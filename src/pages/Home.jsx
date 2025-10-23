@@ -1,36 +1,68 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import HomePage from "../assets/homepage.png";
+import homepage1 from "../assets/HomePage1.png";
+import homepage2 from "../assets/HomePage2.png";
+import homepage3 from "../assets/Homepage3.png";
 
-const MarketingDashboard = () => {
+const Home = () => {
   const navigate = useNavigate();
+
   return (
-    <div className="bg-green-900 min-h-screen w-full">
-      {/* Top Navigation Bar */}
-      <nav className="flex items-center justify-between px-8 py-4 bg-green-900">
-        <div className="flex items-center gap-2">
-          <div className="bg-green-300 rounded p-2 font-bold text-green-900">Greenmate</div>
+    <div className="min-h-screen bg-white text-gray-900 flex flex-col">
+      <nav className="flex justify-between items-center px-8 py-6 shadow-sm bg-white">
+        <div className="text-2xl font-bold text-green-700">GreenMate</div>
+        <div className="flex gap-4">
+          <button onClick={() => navigate("/")} className="text-green-700 hover:underline">Home</button>
+          <button onClick={() => navigate("/Contact")} className="text-green-700 hover:underline">Contact</button>
+          <button onClick={() => navigate("/Signin")} className="bg-green-700 text-white px-4 py-2 rounded-lg">Get Started</button>
         </div>
-        <ul className="flex gap-8 font-medium text-green-100">
-          <li><button className="bg-transparent text-green-100 hover:text-green-300 font-medium">Home</button></li>
-          <li><button className="bg-transparent text-green-100 hover:text-green-300 font-medium">About</button></li>
-          <li><button className="bg-transparent text-green-100 hover:text-green-300 font-medium">Contact</button></li>
-        </ul>
-  <button className="bg-green-300 text-green-900 px-4 py-2 rounded-lg font-bold" onClick={() => navigate("/signin")}>Get Started</button>
       </nav>
 
+
       {/* Hero Section */}
-      <section className="flex flex-col items-center justify-center text-center py-16">
-        <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">START YOUR DATA JOURNEY<br />WITH SMARTAIX</h1>
-        <p className="text-green-100 mb-8 max-w-xl">
-          Equip business professionals across departments with the Data AI insights they need to make the decisions that count
-        </p>
-        {/* Dashboard Picture Placeholder */}
-        <div className="bg-green-900 rounded-2xl shadow-lg p-8 w-full max-w-3xl flex items-center justify-center">
-          <span className="text-green-200 text-2xl">picture</span>
+      <section className="flex flex-col md:flex-row items-center justify-between px-12 py-32 max-w-7xl mx-auto gap-y-12 md:gap-x-20">
+        {/* Left Side - Text */}
+        <div className="flex-1 md:flex-[0.6] space-y-8">
+          <h1 className="text-5xl md:text-6xl font-bold text-green-900 leading-tight">
+            Stay on Top of Your Tasks & Make a Greener Impact
+          </h1>
+          <p className="text-gray-600 text-xl md:text-2xl max-w-2xl">
+            GreenMate helps students track tasks, manage expenses, and see the environmental impact of their spending—all in one place.
+          </p>
+          <div className="flex gap-6">
+            <button onClick={() => navigate("/learnmore")} className="bg-green-700 text-white px-8 py-4 rounded-lg font-semibold shadow hover:bg-green-800 transition">
+              Learn More
+            </button>
+          </div>
+        </div>
+
+        {/* Right Side - Illustration (Collage) */}
+        <div className="relative mt-12 md:mt-0 md:flex-[0.8] lg:flex-[0.9] grid grid-cols-2 gap-4">
+          <img
+            src={HomePage}
+            alt="Student 1"
+            className="w-full h-auto rounded-lg shadow"
+          />
+          <img
+            src={homepage1}
+            alt="Student 2"
+            className="w-full h-auto rounded-lg shadow"
+          />
+          <img
+            src={homepage2}
+            alt="Student 3"
+            className="w-full h-auto rounded-lg shadow"
+          />
+          <img
+            src={homepage3}
+            alt="Student 4"
+            className="w-full h-auto rounded-lg shadow"
+          />
         </div>
       </section>
     </div>
   );
 };
 
-export default MarketingDashboard;
+export default Home;

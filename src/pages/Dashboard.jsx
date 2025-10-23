@@ -1,52 +1,104 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, onSnapshot, doc } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import Sidebar from "./Sidebar";
 
-
 const Dashboard = () => {
-const navigate = useNavigate();
-const [expenses, setExpenses] = useState([]);
-const [filter, setFilter] = useState("Today");
-const [filtered, setFiltered] = useState([]);
-const [total, setTotal] = useState(0);
-const [co2, setCo2] = useState(0);
-const [classes, setClasses] = useState([]);
-const [user, setUser] = useState(null);
+  const navigate = useNavigate();
+  const [expenses, setExpenses] = useState([]);
+  const [filter, setFilter] = useState("Today");
+  const [filtered, setFiltered] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [co2, setCo2] = useState(0);
+  const [classes, setClasses] = useState([]);
 
-useEffect(() => {
-  const ref = doc(db, "users", "currentUser");
-  const unsub = onSnapshot(ref, (snap) => {
-    if (snap.exists()) setUser(snap.data());
+    // ✅ Profile state
+  const [profile, setProfile] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    avatar: "",
   });
-  return unsub;
-}, []);
 
+  // ✅ Sync profile from Firestore
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
 
-useEffect(() => {
-  const unsub = onSnapshot(collection(db, "classes"), (snap) => {
-    setClasses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-  });
-  return unsub;
-}, []);
+    const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
+      if (snap.exists()) setProfile(snap.data());
+    });
 
-// 🔥 Realtime Firestore listener for expenses
-useEffect(() => {
-  const unsub = onSnapshot(collection(db, "expenses"), (snap) => {
-    setExpenses(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-  });
-  return unsub;
-}, []);
+    return () => unsub();
+  }, []);
 
-// 🎯 Filter and calculate totals + CO₂ dynamically
+  // only show classes that are not done on the dashboard
+  const visibleClasses = classes.filter((c) => c.status !== "Completed" && c.status !== "done");
+
+  // format helpers used in JSX
+  const formatDate = (dateStr) => {
+    if (!dateStr) return "";
+    const d = new Date(dateStr);
+    if (isNaN(d)) return dateStr;
+    return d.toLocaleDateString();
+  };
+
+  const formatTime = (timeStr) => {
+    if (!timeStr) return "";
+    const [h, m] = String(timeStr).split(":").map(Number);
+    if (Number.isNaN(h)) return timeStr;
+    const period = h >= 12 ? "PM" : "AM";
+    const hh = h % 12 || 12;
+    return `${hh}:${String(m || 0).padStart(2, "0")} ${period}`;
+  };
+  
+  // Realtime classes
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "classes"),
+      (snap) => {
+        setClasses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
+      (err) => {
+        console.error("classes listener error:", err);
+      }
+    );
+
+    return () => unsub();
+  }, []);
+
+  // Realtime expenses
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "expenses"),
+      (snap) => {
+        setExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
+      (err) => {
+        console.error("expenses listener error:", err);
+      }
+    );
+
+    return () => unsub();
+  }, []);
+
 useEffect(() => {
   const now = new Date();
 
-  const f = expenses.filter((e) => {
-    const d = new Date(e.date);
+  const normalizeDate = (dateValue) => {
+    if (!dateValue) return null;
+    if (dateValue.toDate) return dateValue.toDate(); // Firestore Timestamp
+    return new Date(dateValue); // String date
+  };
 
-    if (filter === "Today") return d.toDateString() === now.toDateString();
+  const f = (Array.isArray(expenses) ? expenses : []).filter((e) => {
+    const d = normalizeDate(e.date);
+    if (!d || isNaN(d)) return false;
+
+    if (filter === "Today") {
+      return d.toDateString() === now.toDateString();
+    }
 
     if (filter === "This week") {
       const weekStart = new Date(now);
@@ -64,54 +116,54 @@ useEffect(() => {
   });
 
   setFiltered(f);
-
   const sum = f.reduce((s, e) => s + (e.amount || 0), 0);
   setTotal(sum);
-  setCo2(sum * 0.5); // ⚙️ example conversion factor (you can tweak)
+  setCo2(sum * 0.5);
 }, [expenses, filter]);
 
+
   return (
-    <div className="min-h-screen bg-gray-100 flex">
+    <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
       {/* Sidebar */}
       <Sidebar />
 
       {/* Main Content */}
-      <main className="flex-1 p-10 grid grid-cols-[2fr_1fr] gap-6">
+      <main className="flex-1 p-5 md:p-10 grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
         {/* Left Section */}
         <div>
           {/* Welcome Section */}
-          <div className="bg-white w-full rounded-lg shadow-sm flex justify-between items-center px-8 py-6 mb-8">
+          <div className="bg-white w-full rounded-lg shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center px-6 py-4 mb-6">
             <div>
-<h2 className="text-xl font-semibold text-gray-800">
-  Welcome back, {user?.name || "User"}!
+<h2 className="text-lg md:text-xl font-semibold text-gray-800">
+  Welcome back, {profile.firstName || "User"}!
 </h2>
-              <p className="text-base text-gray-600">
-                New French speaking classes are available.
+
+              <p className="text-sm md:text-base text-gray-600">
+                "Welcome to GreenMate – your companion for smarter classes, smarter spending, and a greener planet!
               </p>
             </div>
           </div>
 
           {/* Activity Chart + Estimated CO2 */}
-          <div className="flex gap-6 mb-6">
+          <div className="flex flex-col lg:flex-row gap-6 mb-6">
             {/* Activity Chart */}
-            <div className="bg-[#1E1E3F] text-white rounded-2xl shadow p-6 w-1/2">
-              <div className="flex justify-between items-center mb-4">
+            <div className="bg-[#1E1E3F] text-white rounded-2xl shadow p-6 flex-1">
+              <div className="flex flex-wrap justify-between items-center mb-4">
                 <h3 className="text-lg font-semibold">Activity</h3>
                 <select
-  value={filter}
-  onChange={(e) => setFilter(e.target.value)}
-  className="bg-[#2A2A4F] text-sm rounded-lg px-3 py-1 outline-none cursor-pointer"
->
-  <option>Today</option>
-  <option>This week</option>
-  <option>Last month</option>
-</select>
-
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  className="bg-[#2A2A4F] text-sm rounded-lg px-3 py-1 mt-2 sm:mt-0 outline-none cursor-pointer"
+                >
+                  <option>Today</option>
+                  <option>This week</option>
+                  <option>Last month</option>
+                </select>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row items:center justify-between gap-4">
                 {/* Donut Chart */}
-                <div className="relative w-36 h-36">
+                <div className="relative w-32 h-32 sm:w-36 sm:h-36 mx-auto sm:mx-0">
                   <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
                     <circle cx="18" cy="18" r="16" stroke="#2A2A4F" strokeWidth="4" fill="none" />
                     <circle
@@ -171,57 +223,56 @@ useEffect(() => {
                   </svg>
 
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-lg font-bold">${total.toFixed(2)}</span>
-                  <span className="text-xs text-gray-300">Spent</span>
+                    <span className="text-base sm:text-lg font-bold">${total.toFixed(2)}</span>
+                    <span className="text-xs text-gray-300">Spent</span>
                   </div>
                 </div>
 
                 {/* Legend */}
-<ul className="text-sm space-y-2">
-  {(() => {
-    const categoryTotals = filtered.reduce((acc, e) => {
-      acc[e.category] = (acc[e.category] || 0) + e.amount;
-      return acc;
-    }, {});
+                <ul className="text-xs sm:text-sm space-y-2">
+                  {(() => {
+                    const categoryTotals = (filtered || []).reduce((acc, e) => {
+                      acc[e.category] = (acc[e.category] || 0) + (e.amount || 0);
+                      return acc;
+                    }, {});
 
-    const totalAmount = Object.values(categoryTotals).reduce(
-      (sum, val) => sum + val,
-      0
-    );
+                    const totalAmount = Object.values(categoryTotals).reduce(
+                      (sum, val) => sum + val,
+                      0
+                    );
 
-    const colors = {
-      House: "bg-purple-400",
-      Food: "bg-blue-400",
-      Investing: "bg-green-400",
-      "Online Shop": "bg-yellow-400",
-      Beauty: "bg-pink-400",
-    };
+                    const colors = {
+                      House: "bg-purple-400",
+                      Food: "bg-blue-400",
+                      Investing: "bg-green-400",
+                      "Online Shop": "bg-yellow-400",
+                      Beauty: "bg-pink-400",
+                    };
 
-    return Object.entries(categoryTotals).map(([label, amt], idx) => {
-      const percent =
-        totalAmount > 0 ? ((amt / totalAmount) * 100).toFixed(0) + "%" : "0%";
-      return (
-        <li key={idx} className="flex justify-between w-32">
-          <span className="flex items-center gap-2">
-            <span
-              className={`w-3 h-3 ${colors[label] || "bg-gray-400"} rounded-full`}
-            ></span>
-            {label}
-          </span>
-          <span>{percent}</span>
-        </li>
-      );
-    });
-  })()}
-</ul>
-
+                    return Object.entries(categoryTotals).map(([label, amt], idx) => {
+                      const percent =
+                        totalAmount > 0 ? ((amt / totalAmount) * 100).toFixed(0) + "%" : "0%";
+                      return (
+                        <li key={idx} className="flex justify-between w-32">
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={`w-3 h-3 ${colors[label] || "bg-gray-400"} rounded-full`}
+                            ></span>
+                            {label}
+                          </span>
+                          <span>{percent}</span>
+                        </li>
+                      );
+                    });
+                  })()}
+                </ul>
               </div>
             </div>
 
             {/* Estimated CO2 */}
-            <div className="bg-white rounded-2xl shadow p-6 w-1/2 flex flex-col justify-center items-center">
+            <div className="bg-white rounded-2xl shadow p-6 flex-1 flex flex-col justify-center items-center">
               <h3 className="text-lg font-semibold text-gray-800 mb-2">Estimated CO₂</h3>
-              <p className="text-4xl font-bold text-green-600 mb-1">{co2.toFixed(1)} kg</p>
+              <p className="text-3xl md:text-4xl font-bold text-green-600 mb-1">{co2.toFixed(1)} kg</p>
               <p className="text-sm text-gray-500">This month’s total footprint</p>
             </div>
           </div>
@@ -229,89 +280,84 @@ useEffect(() => {
           {/* Classes */}
           <div className="mb-6">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="text-lg font-semibold text-gray-700">Classes</h3>
+              <h3 className="text-lg font-semibold text-gray-700">Task</h3>
               <button
-  onClick={() => navigate("/classroom")}
-  className="text-sm text-blue-600 hover:underline"
->
-  View All
-</button>
+                onClick={() => navigate("/classroom")}
+                className="text-sm text-blue-600 font-medium px-3 py-1 rounded-lg hover:bg-blue-100 hover:text-blue-700 hover:scale-105 active:scale-95 transition-all duration-300 ease-in-out"
+              >
+                View All
+              </button>
             </div>
-<div className="grid grid-cols-3 gap-4">
-  {classes.length === 0 ? (
-    <p className="col-span-3 text-gray-500 text-center">No classes yet.</p>
-  ) : (
-    classes.map((cls) => (
-      <div
-        key={cls.id}
-        className="text-white rounded-2xl p-5 shadow"
-        style={{ backgroundColor: cls.color }}
-      >
-        <h4 className="text-lg font-semibold mb-2">{cls.name}</h4>
-        <p className="text-sm">{cls.tasks} Tasks</p>
-        <p className="text-xs opacity-80">Teacher: {cls.teacher}</p>
-        <p className="text-xs opacity-80">Time: {cls.time}</p>
-      </div>
-    ))
-  )}
-</div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {visibleClasses.length === 0 ? (
+                <p className="col-span-3 text-gray-500 text-center">No Task yet.</p>
+              ) : (
+                visibleClasses.map((cls) => (
+                  <div
+                    key={cls.id}
+                    className="text-white rounded-2xl p-5 shadow relative transition-all duration-300 hover:scale-[1.02] hover:shadow-lg"
+                    style={{ backgroundColor: cls.color || "#3B82F6" }}
+                  >
+                    <h4 className="text-lg font-semibold mb-2">{cls.classname}</h4>
+                    <p className="text-sm">{(Array.isArray(cls.tasks) ? cls.tasks.length : 0)} Tasks</p>
+                    <p className="text-xs opacity-90">Teacher: {cls.teacher}</p>
+                    <p className="text-xs opacity-90">Schedule: {cls.schedule}</p>
+                    <p className="text-xs opacity-90 mb-2">Time: {formatTime(cls.time)}</p>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
 
         {/* Right Section */}
         <div>
-          <div className="bg-white rounded-2xl shadow p-6">
-            {/* Profile */}
-            <div className="text-center mb-">
-<img
-  src={user?.photo || "https://via.placeholder.com/100?text=User"}
-  alt="Profile"
-  className="w-24 h-24 rounded-full mx-auto mb-3 object-cover border"
-/>
-<h3 className="font-semibold text-gray-800 text-lg">
-  {user?.name || "User"}
-</h3>
-<p className="text-sm text-gray-500">{user?.role || "Student"}</p>
-
-              <button
-  onClick={() => navigate("/settings")}
-  className="bg-blue-600 text-white mt-3 px-5 py-2 rounded-xl hover:bg-blue-700 transition"
->
-  Profile
-</button>
-
-            </div>
+<div className="bg-white rounded-2xl shadow p-6">
+  {/* Profile */}
+  <div className="text-center mb-6">
+    <img
+      src={profile.avatar || "https://via.placeholder.com/100?text=User"}
+      alt="Profile"
+      className="w-20 h-20 md:w-24 md:h-24 rounded-full mx-auto mb-3 object-cover border"
+    />
+    <h3 className="font-semibold text-gray-800 text-lg">
+      {profile.firstName} {profile.lastName}
+    </h3>
+    <p className="text-sm text-gray-500">{profile.email}</p>
+    <button
+      onClick={() => navigate("/settings")}
+      className="bg-blue-600 text-white mt-3 px-5 py-2 rounded-xl hover:bg-blue-700 hover:scale-105 hover:shadow-lg active:scale-95 transition-all duration-300 ease-in-out"
+    >
+      Profile
+    </button>
+  </div>
 
             <hr className="my-6 border-gray-200" />
 
             {/* Calendar */}
             <div className="mb-8">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-700">December 2022</h3>
+                <h3 className="font-semibold text-green-700">October 2025</h3>
                 <span className="text-lg">📅</span>
               </div>
-              <div className="grid grid-cols-7 gap-2 text-center text-sm text-gray-700">
+              <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-xs sm:text-sm text-gray-700">
                 {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
                   <div key={d} className="font-medium text-gray-500">{d}</div>
                 ))}
                 {[...Array(31)].map((_, i) => (
-                  <div key={i} className={`py-1 rounded-full ${[7, 19].includes(i + 1) ? "bg-blue-600 text-white font-bold" : "hover:bg-blue-100"}`}>
+                  <div
+                    key={i}
+                    className={`py-1 rounded-full ${
+                      [7, 19].includes(i + 1)
+                        ? "bg-blue-600 text-white font-bold"
+                        : "hover:bg-blue-100"
+                    }`}
+                  >
                     {i + 1}
                   </div>
                 ))}
               </div>
-            </div>
-
-            <hr className="my-6 border-gray-200" />
-
-            {/* Reminders */}
-            <div>
-              <h3 className="font-semibold text-gray-700 mb-3">Reminders</h3>
-              <ul className="space-y-3 text-sm text-gray-600">
-                <li className="flex items-center gap-2">🔔 Eng - Vocabulary test</li>
-                <li className="flex items-center gap-2">📄 Eng - Essay</li>
-                <li className="flex items-center gap-2">🔔 Eng - Speaking Class</li>
-              </ul>
             </div>
           </div>
         </div>
