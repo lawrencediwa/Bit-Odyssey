@@ -1,30 +1,33 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth } from "../firebase"; // adjust path if needed
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { auth } from "../firebase"; 
+import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword } from "firebase/auth";
 
 const Signin = () => {
-  const navigate = useNavigate(); // ✅ must be inside component
+  const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "" });
 
   const handleChange = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // TODO: replace with real signin logic
-    navigate("/dashboard");
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, form.email, form.password);
+      const user = userCredential.user;
+      console.log("Signed in user:", user);
+      navigate("/dashboard");
+    } catch (error) {
+      console.error("Login error:", error);
+      alert(error.message);
+    }
   };
 
   const handleGoogleSignIn = async () => {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-
-      // The signed-in user info
       const user = result.user;
       console.log("Google user:", user);
-
-      // Redirect to dashboard after successful login
       navigate("/dashboard");
     } catch (error) {
       console.error("Google sign-in error:", error);
@@ -81,7 +84,7 @@ const Signin = () => {
 
           <button
             type="button"
-            onClick={handleGoogleSignIn} // ✅ inside component
+            onClick={handleGoogleSignIn}
             className="w-full py-3 rounded-xl border flex items-center justify-center gap-2"
           >
             <img

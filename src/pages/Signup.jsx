@@ -1,7 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth } from "../firebase"; // adjust path if needed
+import { auth, db } from "../firebase"; // adjust path if needed
+import { createUserWithEmailAndPassword } from "firebase/auth";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { collection } from "firebase/firestore";
+
 
 const Signup = () => {
   const navigate = useNavigate();
@@ -9,27 +13,91 @@ const Signup = () => {
 
   const handleChange = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    // TODO: replace with real signup logic
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, form.email, form.password);
+    const user = userCredential.user;
+
+    // Create user Firestore document
+    await setDoc(doc(db, "users", user.uid), {
+      firstName: "",
+      lastName: "",
+      email: form.email,
+      address: "",
+      phone: "",
+      dob: "",
+      location: "",
+      postal: "",
+      avatar: "",
+      gender: "male",
+    });
+
+    // -------------------------------
+    // CREATE EMPTY SUBCOLLECTIONS HERE
+    // -------------------------------
+
+    await setDoc(doc(collection(db, "users", user.uid, "classes")), {
+      initialized: true,
+    });
+
+    await setDoc(doc(collection(db, "users", user.uid, "expenses")), {
+      initialized: true,
+    });
+
     navigate("/dashboard");
-  };
+  } catch (error) {
+    console.error("Signup error:", error);
+    alert(error.message);
+  }
+};
 
-  const handleGoogleSignUp = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
 
-      const user = result.user;
-      console.log("Google user:", user);
+const handleGoogleSignUp = async () => {
+  try {
+    const provider = new GoogleAuthProvider();
+    const result = await signInWithPopup(auth, provider);
+    const user = result.user;
 
-      // Redirect to dashboard
-      navigate("/dashboard");
-    } catch (error) {
-      console.error("Google sign-up error:", error);
-      alert(error.message);
+    const userRef = doc(db, "users", user.uid);
+    const snap = await getDoc(userRef);
+
+    if (!snap.exists()) {
+      // Create Firestore user doc
+      await setDoc(userRef, {
+        firstName: "",
+        lastName: "",
+        email: user.email,
+        address: "",
+        phone: "",
+        dob: "",
+        location: "",
+        postal: "",
+        avatar: "",
+        gender: "male",
+      });
+
+      // -------------------------------
+      // CREATE EMPTY SUBCOLLECTIONS HERE
+      // -------------------------------
+
+      await setDoc(doc(collection(db, "users", user.uid, "classes")), {
+        initialized: true,
+      });
+
+      await setDoc(doc(collection(db, "users", user.uid, "expenses")), {
+        initialized: true,
+      });
     }
-  };
+
+    navigate("/dashboard");
+  } catch (error) {
+    console.error("Google sign-up error:", error);
+    alert(error.message);
+  }
+};
+
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">

@@ -1,16 +1,22 @@
 import React, { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
+import { auth } from "../firebase";
 
 const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
 
-  const handleLogout = () => {
-    localStorage.removeItem("userToken");
-    navigate("/");
-  };
+const handleLogout = async () => {
+  try {
+    await auth.signOut(); // 🔑 actually logs out from Firebase
+    localStorage.removeItem("userToken"); // optional, if you store something
+    navigate("/"); // redirect to sign-in page
+  } catch (error) {
+    console.error("Logout error:", error);
+  }
+};
 
   const navItems = [
     { name: "Dashboard", path: "/dashboard" },

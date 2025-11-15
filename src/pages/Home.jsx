@@ -15,7 +15,7 @@ const Home = () => {
         <div className="flex gap-4">
           <button onClick={() => navigate("/")} className="text-green-700 hover:underline">Home</button>
           <button onClick={() => navigate("/Contact")} className="text-green-700 hover:underline">Contact</button>
-          <button onClick={() => navigate("/Signin")} className="bg-green-700 text-white px-4 py-2 rounded-lg">Get Started</button>
+          <button onClick={() => navigate("/SignUp")} className="bg-green-700 text-white px-4 py-2 rounded-lg">Get Started</button>
         </div>
       </nav>
 

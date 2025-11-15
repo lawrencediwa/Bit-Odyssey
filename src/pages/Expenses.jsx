@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import Sidebar from "./Sidebar";
-import { db } from "../firebase";
+import { motion } from "framer-motion";
+import { db, auth } from "../firebase";
 import {
   collection,
   addDoc,
@@ -9,18 +10,32 @@ import {
   deleteDoc,
   updateDoc,
   doc,
+  getDoc,
 } from "firebase/firestore";
 
 const Expenses = () => {
   const [expenses, setExpenses] = useState([]);
   const [form, setForm] = useState({ category: "House", amount: "", date: "" });
   const [filter, setFilter] = useState("Today");
-  const [filtered, setFiltered] = useState([]);
   const [total, setTotal] = useState(0);
   const [categoryTotals, setCategoryTotals] = useState({});
   const [co2, setCo2] = useState(0);
   const [showHistory, setShowHistory] = useState(false);
   const [editExpense, setEditExpense] = useState(null);
+  const [expensesData, setExpensesData] = useState([]);
+
+useEffect(() => {
+  const loadUserData = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const snap = await getDoc(doc(db, "users", user.uid));
+    if (snap.exists()) {
+      setExpensesData(snap.data().expenses || []);
+    }
+  };
+  loadUserData();
+}, []);
+
 
   // ✅ REALTIME FIRESTORE LISTENER (no local updates anymore)
   useEffect(() => {
@@ -58,7 +73,6 @@ const Expenses = () => {
       return true;
     });
 
-    setFiltered(f);
     const sum = f.reduce((s, e) => s + Number(e.amount), 0);
     setTotal(sum);
     setCo2(sum * 0.5);
@@ -120,11 +134,6 @@ const Expenses = () => {
 
   // ✅ CATEGORY STATE (still local because it’s UI preference, not data)
   const [categories, setCategories] = useState([
-    { label: "House", color: "#A78BFA" },
-    { label: "Food", color: "#60A5FA" },
-    { label: "Investing", color: "#34D399" },
-    { label: "Online Shop", color: "#FBBF24" },
-    { label: "Beauty", color: "#F472B6" },
   ]);
   const [editingCategory, setEditingCategory] = useState(null);
   const [catForm, setCatForm] = useState({ label: "", color: "#9CA3AF" });
@@ -134,89 +143,135 @@ const Expenses = () => {
     setCatForm({ label: cat.label, color: cat.color });
   };
 
-  const saveEditedCategory = () => {
-    if (!editingCategory) return;
-    if (!catForm.label.trim()) {
-      alert("Category label cannot be empty.");
-      return;
-    }
-    // prevent duplicate label (except renaming to same)
-    if (
-      categories.some(
-        (c) => c.label.toLowerCase() === catForm.label.trim().toLowerCase() && c.label !== editingCategory
-      )
-    ) {
-      alert("A category with that label already exists.");
-      return;
-    }
+const saveEditedCategory = async () => {
+  if (!editingCategory) return;
+  if (!catForm.label.trim()) {
+    alert("Category label cannot be empty.");
+    return;
+  }
 
-    setCategories((prev) =>
-      prev.map((c) =>
-        c.label === editingCategory ? { ...c, label: catForm.label.trim(), color: catForm.color } : c
-      )
+  // Prevent duplicate labels
+  if (
+    categories.some(
+      (c) =>
+        c.label.toLowerCase() === catForm.label.trim().toLowerCase() &&
+        c.label !== editingCategory
+    )
+  ) {
+    alert("A category with that label already exists.");
+    return;
+  }
+
+  try {
+    // Find the Firestore doc
+    const catDoc = categories.find((c) => c.label === editingCategory);
+    if (!catDoc) return;
+
+    // Update Firestore
+    const ref = doc(db, "categories", catDoc.id);
+    await updateDoc(ref, {
+      label: catForm.label.trim(),
+      color: catForm.color,
+    });
+
+    // Update expenses that used this category
+    const expensesToUpdate = expenses.filter(
+      (e) => e.category === editingCategory
     );
-    // Update expenses that used the old category label
-    setExpenses((prev) =>
-      prev.map((e) => (e.category === editingCategory ? { ...e, category: catForm.label.trim() } : e))
-    );
+    for (let e of expensesToUpdate) {
+      const refExp = doc(db, "expenses", e.id);
+      await updateDoc(refExp, { category: catForm.label.trim() });
+    }
 
     setEditingCategory(null);
     setCatForm({ label: "", color: "#9CA3AF" });
-  };
-
+  } catch (err) {
+    console.error(err);
+    alert("Failed to save category.");
+  }
+};
   const cancelEditCategory = () => {
     setEditingCategory(null);
     setCatForm({ label: "", color: "#9CA3AF" });
   };
 
-  const deleteCategory = (label) => {
-    if (!label) return;
-    const ok = window.confirm(
-      `Delete category "${label}"?\nExpenses in this category will be moved to "Uncategorized".`
-    );
-    if (!ok) return;
+const deleteCategory = async (label) => {
+  if (!label) return;
+  const ok = window.confirm(
+    `Delete category "${label}"?\nExpenses in this category will be moved to "Uncategorized".`
+  );
+  if (!ok) return;
 
-    // remove category
-    setCategories((prev) => {
-      const next = prev.filter((c) => c.label !== label);
-      if (!next.some((c) => c.label === "Uncategorized")) {
-        next.push({ label: "Uncategorized", color: "#9CA3AF" });
-      }
-      return next;
-    });
-
-    // move expenses to "Uncategorized"
-    setExpenses((prev) =>
-      prev.map((e) => (e.category === label ? { ...e, category: "Uncategorized" } : e))
-    );
-
-    if (editingCategory === label) {
-      setEditingCategory(null);
-      setCatForm({ label: "", color: "#9CA3AF" });
+  try {
+    // Delete the Firestore doc
+    const catDoc = categories.find((c) => c.label === label);
+    if (catDoc) {
+      await deleteDoc(doc(db, "categories", catDoc.id));
     }
-  };
 
-  const addCategory = () => {
-    if (!catForm.label.trim()) {
-      alert("Enter a label for the new category.");
-      return;
+    // Move expenses to "Uncategorized" and update Firestore
+    const updatedExpenses = expenses.filter((e) => e.category === label);
+    for (let e of updatedExpenses) {
+      const refExp = doc(db, "expenses", e.id);
+      await updateDoc(refExp, { category: "Uncategorized" });
     }
-    if (categories.some((c) => c.label.toLowerCase() === catForm.label.trim().toLowerCase())) {
-      alert("Category already exists.");
-      return;
+
+    // Add "Uncategorized" category if not exist
+    if (!categories.some((c) => c.label === "Uncategorized")) {
+      await addDoc(collection(db, "categories"), {
+        label: "Uncategorized",
+        color: "#9CA3AF",
+      });
     }
-    const newCat = { label: catForm.label.trim(), color: catForm.color || "#9CA3AF" };
-    setCategories((prev) => [newCat, ...prev]);
+
+    setEditingCategory(null);
     setCatForm({ label: "", color: "#9CA3AF" });
-  };
+  } catch (err) {
+    console.error(err);
+    alert("Failed to delete category.");
+  }
+};
+
+
+// Load categories from Firestore
+useEffect(() => {
+  const unsub = onSnapshot(collection(db, "categories"), (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    setCategories(list);
+  });
+  return () => unsub();
+}, []);
+
+// Add category
+const addCategory = async () => {
+  if (!catForm.label.trim()) return alert("Enter a label.");
+  const exists = categories.some(
+    (c) => c.label.toLowerCase() === catForm.label.trim().toLowerCase()
+  );
+  if (exists) return alert("Category already exists.");
+
+  await addDoc(collection(db, "categories"), { 
+    label: catForm.label.trim(), 
+    color: catForm.color || "#9CA3AF" 
+  });
+
+  setCatForm({ label: "", color: "#9CA3AF" });
+};
+
   // --- CHANGES END ---
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
-      {/* Sidebar */}
-      <Sidebar />
-
-      <main className="flex-1 p-4 sm:p-6 md:p-10">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 20 }}
+      transition={{ duration: 0.3 }}
+      className="flex flex-col lg:flex-row min-h-screen bg-gray-100"
+    >
+    <div className="w-full lg:w-64">
+    <Sidebar />
+</div>
+      <main className="flex-1 p-4 lg:p-10">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
           <h2 className="text-2xl font-semibold text-gray-800">Expenses</h2>
@@ -228,6 +283,27 @@ const Expenses = () => {
           >
             View History
           </button>
+        </div>
+
+        {/* Upper section: Budget Goals, Analytics, Budget Limits, CO2 Limit */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <div className="bg-white p-4 rounded-xl shadow-md">
+            <h3 className="text-lg font-medium mb-2">Budget Goals</h3>
+            <p className="text-sm text-gray-600">Total Expenses: ${total.toFixed(2)}</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-md">
+            <h3 className="text-lg font-medium mb-2">Analytics</h3>
+            <p className="text-sm text-gray-600">CO2 Footprint: {co2.toFixed(2)} kg</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-md">
+            <h3 className="text-lg font-medium mb-2">Budget & CO2 Limits</h3>
+            <p className="text-sm text-gray-600">Category Totals:</p>
+            <ul className="text-sm text-gray-600">
+              {Object.entries(categoryTotals).map(([category, amount]) => (
+                <li key={category}>{category}: ${amount.toFixed(2)}</li>
+              ))}
+            </ul>
+          </div>
         </div>
 
         {/* Add Expense Form */}
@@ -486,7 +562,7 @@ const Expenses = () => {
           </div>
         )}
       </main>
-    </div>
+        </motion.div> 
   );
 };
 

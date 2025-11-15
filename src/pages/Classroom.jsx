@@ -3,8 +3,9 @@ import Sidebar from "./Sidebar";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
+import { motion } from "framer-motion";
 
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import {
   collection,
   addDoc,
@@ -13,6 +14,7 @@ import {
   doc,
   updateDoc,
   serverTimestamp,
+  getDoc,
 } from "firebase/firestore";
 
 const COLOR_OPTIONS = [
@@ -42,12 +44,33 @@ const Classroom = () => {
     status: "Ongoing", // or "Completed"
     color: COLOR_OPTIONS[0],
   });
-  const [taskInput, setTaskInput] = useState(""); // single task text field
+  // taskInput removed: tasks are added via class card quick-add
   const [editId, setEditId] = useState(null);
 
-  // Local edits for tasks per class card (not saved until Save Tasks clicked)
-  // Map: { [classId]: [{name, done}, ...] }
-  const [taskEdits, setTaskEdits] = useState({});
+  // Add-task form state (separate from class form)
+  const [taskClassId, setTaskClassId] = useState("");
+  const [newTaskName, setNewTaskName] = useState("");
+  const [newTaskComment, setNewTaskComment] = useState("");
+  const [taskTarget, setTaskTarget] = useState("class"); // 'class' or 'date'
+  const [taskDate, setTaskDate] = useState("");
+  const [taskTime, setTaskTime] = useState("");
+  const [dateTasks, setDateTasks] = useState([]);
+  const [classroomData, setClassroomData] = useState([]);
+
+useEffect(() => {
+  const loadUserData = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const snap = await getDoc(doc(db, "users", user.uid));
+    if (snap.exists()) {
+      setClassroomData(snap.data().classroom || []);
+    }
+  };
+  loadUserData();
+}, []);
+
+
+  // Inline/local task editing removed — tasks are managed through the Add Task panel or modals
 
   // view & filter state
   const [calendarView, setCalendarView] = useState("dayGridMonth");
@@ -62,12 +85,12 @@ const Classroom = () => {
 const [eventModalOpen, setEventModalOpen] = useState(false);
 const [eventModalTitle, setEventModalTitle] = useState("");
 const [eventModalTasks, setEventModalTasks] = useState([]);
+const [eventModalTask, setEventModalTask] = useState(null); // single date-task for edit/delete in modal
+const [selectedTaskIndex, setSelectedTaskIndex] = useState(null); // for class modal task selection
 
-// --- replace your existing filteredEvents with this version ---
 const filteredEvents = classes
   .filter((c) => statusFilter === "all" || c.status === statusFilter)
   .flatMap((cls) => {
-    // class event (same as before)
     const classEvent = {
       title: cls.classname,
       start:
@@ -81,27 +104,33 @@ const filteredEvents = classes
       id: `class-${cls.id}`,
     };
 
-    // tasks grouped into one event (only if there are tasks)
-    const tasks = Array.isArray(cls.tasks) ? cls.tasks : [];
-    const taskEvent =
-      tasks.length > 0
-        ? {
-            title: `${cls.classname} (${tasks.length} Task${tasks.length > 1 ? "s" : ""})`,
-            start:
-              cls.schedule && /^\d{4}-\d{2}-\d{2}$/.test(cls.schedule)
-                ? cls.time
-                  ? `${cls.schedule}T${cls.time}`
-                  : cls.schedule
-                : null,
-            color: "#374151", // darker neutral color for tasks
-            extendedProps: { type: "tasks", tasks, classname: cls.classname, classId: cls.id },
-            id: `tasks-${cls.id}`,
-          }
-        : null;
+    // ---- NEW: each task as its own event ----
+    const taskEvents = (cls.tasks || [])
+      .filter(t => t.date) // only tasks with a date
+      .map(t => ({
+        title: t.name,
+        start: t.time ? `${t.date}T${t.time}` : t.date,
+        color: "#374151",
+        extendedProps: { type: "classTask", classId: cls.id, done: t.done },
+        id: `classTask-${cls.id}-${t.name}-${t.date}`,
+      }));
 
-    // return both (taskEvent may be null)
-    return taskEvent ? [classEvent, taskEvent] : [classEvent];
+    return [classEvent, ...taskEvents]; // combine class + individual tasks
   });
+
+
+// include standalone date tasks in calendar events
+const dateTaskEvents = (Array.isArray(dateTasks) ? dateTasks : []).map((t) => {
+  // t.date expected in YYYY-MM-DD, time optional
+  const start = t.date ? (t.time ? `${t.date}T${t.time}` : t.date) : null;
+  return {
+    title: t.name,
+    start,
+    color: t.color || "#374151",
+    extendedProps: { type: "dateTask", taskId: t.id, done: !!t.done, comment: t.comment || "" },
+    id: `dateTask-${t.id}`,
+  };
+});
 
   // ---------- Firestore: realtime listener for classes ----------
   useEffect(() => {
@@ -112,18 +141,27 @@ const filteredEvents = classes
         const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setClasses(docs);
 
-        // initialize any missing tasks into taskEdits map
-        const initialEdits = {};
-        docs.forEach((c) => {
-          initialEdits[c.id] = Array.isArray(c.tasks) ? c.tasks.map((t) => ({ ...t })) : [];
-        });
-        setTaskEdits((prev) => ({ ...initialEdits, ...prev }));
+        // no per-card local task edits map needed anymore
       },
       (err) => {
         console.error("Failed to listen to classes:", err);
       }
     );
 
+    return () => unsub();
+  }, []);
+
+  // listen to standalone tasks (date-based tasks)
+  useEffect(() => {
+    const q = collection(db, "tasks");
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setDateTasks(docs);
+      },
+      (err) => console.error("Failed to listen to tasks:", err)
+    );
     return () => unsub();
   }, []);
 
@@ -138,28 +176,11 @@ const filteredEvents = classes
       status: "Ongoing",
       color: COLOR_OPTIONS[0],
     });
-    setTaskInput("");
     setEditId(null);
   };
 
   // Form-local task helpers (for the add/edit form)
-  const addTaskToForm = () => {
-    const name = taskInput.trim();
-    if (!name) return;
-    setForm((f) => ({ ...f, tasks: [...(Array.isArray(f.tasks) ? f.tasks : []), { name, done: false }] }));
-    setTaskInput("");
-  };
-
-  const removeTaskFromForm = (index) => {
-    setForm((f) => ({ ...f, tasks: (f.tasks || []).filter((_, i) => i !== index) }));
-  };
-
-  const toggleTaskDoneInForm = (index) => {
-    setForm((f) => ({
-      ...f,
-      tasks: (f.tasks || []).map((t, i) => (i === index ? { ...t, done: !t.done } : t)),
-    }));
-  };
+  // Tasks are managed on each class card (quick-add) so the top form no longer edits tasks.
 
   // submit: either addDoc or updateDoc
   const handleSubmit = async (e) => {
@@ -210,7 +231,8 @@ const filteredEvents = classes
       teacher: cls.teacher || "",
       schedule: cls.schedule || "",
       time: cls.time || "",
-      tasks: Array.isArray(cls.tasks) ? cls.tasks.map((t) => ({ ...t })) : [],
+      // do not load tasks into the top form; tasks are managed on the class card
+      tasks: [],
       status: cls.status || "Ongoing",
       color: cls.color || COLOR_OPTIONS[0],
     });
@@ -237,177 +259,211 @@ const filteredEvents = classes
     }
   };
 
-  // Task operations on the card: modify local taskEdits only until Save is clicked
-  const ensureTaskEditsFor = (classId) => {
-    setTaskEdits((prev) => {
-      if (prev[classId]) return prev;
-      const cls = classes.find((c) => c.id === classId) || {};
-      return { ...prev, [classId]: Array.isArray(cls.tasks) ? cls.tasks.map((t) => ({ ...t })) : [] };
-    });
-  };
+  // Task card inline editing and quick-add removed — tasks are managed through the Add Task panel
 
-  const toggleTaskLocal = (classId, index) => {
-    ensureTaskEditsFor(classId);
-    setTaskEdits((prev) => ({
-      ...prev,
-      [classId]: (prev[classId] || []).map((t, i) => (i === index ? { ...t, done: !t.done } : t)),
-    }));
-  };
+  // Add task to a selected class from the right-column Add Task form.
+  const handleAddTaskToClass = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const name = (newTaskName || "").trim();
+    if (!name) return;
 
-  const removeTaskLocal = (classId, index) => {
-    ensureTaskEditsFor(classId);
-    setTaskEdits((prev) => ({
-      ...prev,
-      [classId]: (prev[classId] || []).filter((_, i) => i !== index),
-    }));
-  };
-
-  const addTaskLocal = (classId, name) => {
-    if (!name || !name.trim()) return;
-    ensureTaskEditsFor(classId);
-    setTaskEdits((prev) => ({
-      ...prev,
-      [classId]: [...(prev[classId] || []), { name: name.trim(), done: false }],
-    }));
-  };
-
-  // Save local edits to Firestore for that class
-  const saveTasksForClass = async (classId) => {
-    const tasks = Array.isArray(taskEdits[classId]) ? taskEdits[classId] : [];
     try {
-      await updateDoc(doc(db, "classes", classId), { tasks });
-      // onSnapshot will refresh the UI
+      if (taskTarget === "class") {
+        if (!taskClassId) {
+          alert("Please select a class to add the task to.");
+          return;
+        }
+        const cls = classes.find((c) => c.id === taskClassId) || { tasks: [] };
+        const tasks = Array.isArray(cls.tasks) ? cls.tasks : [];
+        // include optional comment for class task
+        await updateDoc(doc(db, "classes", taskClassId), {
+  tasks: [...tasks, { name, done: false, comment: newTaskComment || "", date: taskDate, time: taskTime || null }]
+});
+      } else {
+        // date task: store in 'tasks' collection
+        if (!taskDate) {
+          alert("Please select a date for this task.");
+          return;
+        }
+        await addDoc(collection(db, "tasks"), {
+          name,
+          date: taskDate,
+          time: taskTime || null,
+          done: false,
+          comment: newTaskComment || "",
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      setNewTaskName("");
+      setTaskDate("");
+      setTaskTime("");
+  setNewTaskComment("");
     } catch (err) {
-      console.error("Failed to save tasks:", err);
-      alert("Failed to save tasks.");
+      console.error("Failed to add task:", err);
+      alert("Failed to add task. Check console for details.");
     }
   };
 
-  // Add task to class quickly via input on card (adds to local edits)
-  const handleQuickAdd = (classId, inputEl) => {
-    if (!inputEl) return;
-    const v = inputEl.value.trim();
-    if (!v) return;
-    addTaskLocal(classId, v);
-    inputEl.value = "";
-  };
-
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col lg:flex-row">
-      <Sidebar />
+        <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 20 }}
+      transition={{ duration: 0.3 }}
+      className="flex flex-col lg:flex-row min-h-screen bg-gray-100"
+    >
+    {/* Sidebar */}
+    <div className="w-full lg:w-64">
+    <Sidebar />
+</div>
+  <main className="flex-1 p-4 lg:p-10">
+    <div className="w-full max-w-7xl mx-auto">
+    <h2 className="text-2xl font-semibold text-gray-800 mb-6">Classroom Manager</h2>
 
-      <main className="flex-1 p-6 lg:p-10">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-6">Classroom Manager</h2>
-
-        {/* Add/Edit Form */}
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white p-5 rounded-xl shadow-md mb-8 grid grid-cols-1 sm:grid-cols-2 gap-4"
-        >
-          <div className="flex flex-col gap-2">
-            <input
-              type="text"
-              placeholder="Class Name"
-              value={form.classname}
-              onChange={(e) => setForm({ ...form, classname: e.target.value })}
-              className="border rounded-lg p-2 w-full"
-            />
-            <input
-              type="text"
-              placeholder="Teacher"
-              value={form.teacher}
-              onChange={(e) => setForm({ ...form, teacher: e.target.value })}
-              className="border rounded-lg p-2 w-full"
-            />
-            <input
-              type="text"
-              placeholder="Schedule (e.g. Mon/Wed or 2025-10-23)"
-              value={form.schedule}
-              onChange={(e) => setForm({ ...form, schedule: e.target.value })}
-              className="border rounded-lg p-2 w-full"
-            />
-            <input
-              type="time"
-              value={form.time}
-              onChange={(e) => setForm({ ...form, time: e.target.value })}
-              className="border rounded-lg p-2 w-full"
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
+        {/* Two equal columns: left = Add/Edit Class, right = Add Task */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <div className="bg-white p-4 rounded-xl shadow-md w-full md:col-span-1 flex flex-col h-full md:min-h-[280px]">
+            <h3 className="text-lg font-medium mb-3">Add Class</h3>
+            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+              <label className="text-sm text-gray-600">Class Name</label>
               <input
                 type="text"
-                placeholder="New task"
-                value={taskInput}
-                onChange={(e) => setTaskInput(e.target.value)}
-                className="border rounded-lg p-2 flex-1"
+                placeholder="Class Name"
+                value={form.classname}
+                onChange={(e) => setForm({ ...form, classname: e.target.value })}
+                className="border rounded p-2 w-full placeholder-gray-400 text-sm"
               />
-              <button
-                type="button"
-                onClick={addTaskToForm}
-                className="bg-blue-600 text-white px-3 py-2 rounded-lg"
-              >
-                Add
-              </button>
-            </div>
 
-            <div className="overflow-auto max-h-40 border rounded p-2 bg-white">
-              {Array.isArray(form.tasks) && form.tasks.length > 0 ? (
-                form.tasks.map((t, i) => (
-                  <div key={i} className="flex items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={!!t.done}
-                        onChange={() => toggleTaskDoneInForm(i)}
-                      />
-                      <span className={`${t.done ? "line-through text-gray-400" : ""}`}>
-                        {t.name}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeTaskFromForm(i)}
-                      className="text-sm text-red-500"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-gray-500">No tasks added yet.</p>
-              )}
-            </div>
+              <label className="text-sm text-gray-600">Teacher</label>
+              <input
+                type="text"
+                placeholder="Teacher"
+                value={form.teacher}
+                onChange={(e) => setForm({ ...form, teacher: e.target.value })}
+                className="border rounded p-2 w-full placeholder-gray-400 text-sm"
+              />
 
-            {/* Color selector (dots) */}
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-sm text-gray-600">Color:</span>
-              <div className="flex gap-2">
+              <label className="text-sm text-gray-600">Schedule</label>
+              <input
+                type="text"
+                placeholder="Schedule (e.g. Mon/Wed or 2025-10-23)"
+                value={form.schedule}
+                onChange={(e) => setForm({ ...form, schedule: e.target.value })}
+                className="border rounded p-2 w-full placeholder-gray-400 text-sm"
+              />
+
+              <label className="text-sm text-gray-600">Time</label>
+              <input
+                type="time"
+                value={form.time}
+                onChange={(e) => setForm({ ...form, time: e.target.value })}
+                className="border rounded p-2 w-full text-sm"
+              />
+
+              <label className="text-sm text-gray-600">Color</label>
+              <div className="flex items-center gap-2">
                 {COLOR_OPTIONS.map((c) => (
                   <button
                     key={c}
                     type="button"
                     aria-label={`Select color ${c}`}
                     onClick={() => setForm((f) => ({ ...f, color: c }))}
-                    className={`w-7 h-7 rounded-full border-2 ${form.color === c ? "ring-2 ring-offset-1" : ""}`}
+                    className={`w-6 h-6 rounded-full border ${form.color === c ? "ring-1" : ""}`}
                     style={{ backgroundColor: c }}
                   />
                 ))}
               </div>
-              <div className="ml-auto text-xs text-gray-500">Selected</div>
-            </div>
 
-            <div className="sm:col-span-2 flex justify-end mt-2">
-              <button
-                type="submit"
-                className="bg-green-600 text-white rounded-lg py-2 px-6 hover:bg-green-700"
-              >
-                {editId ? "Update Class" : "Add Class"}
-              </button>
-            </div>
+              <div className="flex justify-end mt-2">
+                <button type="submit" className="bg-green-600 text-white rounded px-4 py-2 text-sm hover:bg-green-700">
+                  {editId ? "Update Class" : "Add Class"}
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
+
+
+
+          {/* Right column: Add Task to selected class */}
+          <div className="bg-white p-4 rounded-xl shadow-md w-full md:col-span-1 flex flex-col h-full md:min-h-[280px] justify-center">
+            <h3 className="text-lg font-medium mb-3">Add Task</h3>
+            <form onSubmit={handleAddTaskToClass} className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <label className={`px-3 py-1 rounded cursor-pointer ${taskTarget === 'class' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>
+                  <input className="hidden" type="radio" name="taskTarget" value="class" checked={taskTarget === 'class'} onChange={() => setTaskTarget('class')} />
+                  Add to Class
+                </label>
+                <label className={`px-3 py-1 rounded cursor-pointer ${taskTarget === 'date' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>
+                  <input className="hidden" type="radio" name="taskTarget" value="date" checked={taskTarget === 'date'} onChange={() => setTaskTarget('date')} />
+                  Add to Date
+                </label>
+              </div>
+
+              {taskTarget === 'class' ? (
+                <>
+                <label className="text-sm text-gray-600">Task name</label>
+                  <input
+                    type="text"
+                    value={newTaskName}
+                    onChange={(e) => setNewTaskName(e.target.value)}
+                    placeholder="Enter task name"
+                    className="border rounded p-2 w-full text-sm placeholder-gray-400"
+                  />
+                  <label className="text-sm text-gray-600">Select Class</label>
+                  <select
+                    value={taskClassId}
+                    onChange={(e) => setTaskClassId(e.target.value)}
+                    className="border rounded p-2 w-full text-sm"
+                  >
+                    <option value="">-- Select class --</option>
+                    {classes.map((c) => (
+                      <option key={c.id} value={c.id}>{c.classname}</option>
+                    ))}
+                  </select>
+                  <label className="text-sm text-gray-600">Description (optional)</label>
+                  <textarea
+                    value={newTaskComment}
+                    onChange={(e) => setNewTaskComment(e.target.value)}
+                    placeholder="Add a short description or notes for this task"
+                    className="border rounded p-2 h-20 text-sm w-full placeholder-gray-400"
+                  />
+                </>
+              ) : (
+                <>
+                  <label className="text-sm text-gray-600">Task name</label>
+                  <input
+                  type="text"
+                  value={newTaskName}
+                  onChange={(e) => setNewTaskName(e.target.value)}
+                  placeholder="Enter task name"
+                  className="border rounded p-2"
+                  />
+                  <label className="text-sm text-gray-600">Date</label>
+                  <input type="date" value={taskDate} onChange={(e) => setTaskDate(e.target.value)} className="border rounded p-2" />
+                  <label className="text-sm text-gray-600">Time (optional)</label>
+                  <input type="time" value={taskTime} onChange={(e) => setTaskTime(e.target.value)} className="border rounded p-2" />
+                  <label className="text-sm text-gray-600">Comment (optional)</label>
+                  <textarea
+                    value={newTaskComment}
+                    onChange={(e) => setNewTaskComment(e.target.value)}
+                    placeholder="Add a short description or notes for this calendar task"
+                    className="border rounded p-2 h-24"
+                  />
+                </>
+              )}
+
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white rounded px-4 py-2 text-sm hover:bg-blue-700"
+                >
+                  Add Task
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
 
         {/* Controls */}
         <div className="flex items-center justify-between mb-4">
@@ -428,14 +484,28 @@ const filteredEvents = classes
   ref={calendarRef}
   plugins={[dayGridPlugin, interactionPlugin]}
   initialView={calendarView}
-  events={filteredEvents}
+  events={[...filteredEvents, ...dateTaskEvents]}
   height="70vh"
   eventClick={(info) => {
-    // info.event.extendedProps contains our custom props
     const ext = info.event.extendedProps || {};
     if (ext.type === "tasks" && Array.isArray(ext.tasks)) {
       setEventModalTitle(info.event.title || "Tasks");
       setEventModalTasks(ext.tasks);
+      setEventModalOpen(true);
+    } else if (ext.type === 'dateTask') {
+      // load the full task doc from dateTasks (real-time listener) so we can edit/delete it
+      const taskId = ext.taskId;
+      const taskDoc = (dateTasks || []).find((t) => t.id === taskId) || {
+        id: taskId,
+        name: info.event.title || "",
+        date: info.event.startStr ? info.event.startStr.split('T')[0] : "",
+        time: info.event.startStr && info.event.startStr.includes('T') ? info.event.startStr.split('T')[1].slice(0,5) : "",
+        comment: ext.comment || "",
+        done: !!ext.done,
+      };
+      setEventModalTitle(taskDoc.name || 'Task');
+      setEventModalTask(taskDoc);
+      setEventModalTasks([]);
       setEventModalOpen(true);
     } else {
       // class event clicked - optionally show basic details
@@ -447,7 +517,7 @@ const filteredEvents = classes
       setEventModalOpen(true);
     }
   }}
-/>
+/> 
 
 {/* --- Add modal JSX somewhere near the bottom of the component (inside return, sibling to calendar) --- */}
 {eventModalOpen && (
@@ -466,78 +536,205 @@ const filteredEvents = classes
       </div>
 
       <div className="space-y-2 max-h-64 overflow-auto">
-        {eventModalTasks.map((t, i) => (
-          <div key={i} className="flex items-center justify-between gap-2 p-2 rounded hover:bg-gray-50">
-            <div className="flex items-center gap-2">
-              <span className={`w-4 h-4 flex items-center justify-center rounded text-xs ${t.done ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-600"}`}>
-                {t.done ? "✓" : "•"}
-              </span>
-              <div className="text-sm">
-                <div className={`${t.done ? "line-through text-gray-400" : ""}`}>{t.name}</div>
+        {eventModalTask ? (
+          <div className="flex flex-col gap-2 p-2">
+            <label className="text-sm text-gray-600">Task name</label>
+            <input
+              type="text"
+              value={eventModalTask.name || ''}
+              onChange={(e) => setEventModalTask((s) => ({ ...s, name: e.target.value }))}
+              className="border rounded p-2"
+            />
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-sm text-gray-600">Date</label>
+                <input
+                  type="date"
+                  value={eventModalTask.date || ''}
+                  onChange={(e) => setEventModalTask((s) => ({ ...s, date: e.target.value }))}
+                  className="border rounded p-2 w-full"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-600">Time (optional)</label>
+                <input
+                  type="time"
+                  value={eventModalTask.time || ''}
+                  onChange={(e) => setEventModalTask((s) => ({ ...s, time: e.target.value }))}
+                  className="border rounded p-2 w-full"
+                />
               </div>
             </div>
-            {/* If you want a button to toggle status from modal you can implement it; for now this is read-only */}
-            <div className="text-xs text-gray-400">{t.done ? "Done" : "Pending"}</div>
+
+            <label className="text-sm text-gray-600">Comment</label>
+            <textarea
+              value={eventModalTask.comment || ''}
+              onChange={(e) => setEventModalTask((s) => ({ ...s, comment: e.target.value }))}
+              className="border rounded p-2 h-24"
+            />
+
+            <div className="flex items-center gap-2">
+              <input
+                id="modalDone"
+                type="checkbox"
+                checked={!!eventModalTask.done}
+                onChange={(e) => setEventModalTask((s) => ({ ...s, done: e.target.checked }))}
+              />
+              <label htmlFor="modalDone" className="text-sm text-gray-600">Done</label>
+            </div>
           </div>
-        ))}
+        ) : eventModalTasks && eventModalTasks.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="max-h-64 overflow-auto space-y-2">
+              {eventModalTasks.map((t, i) => (
+                <button
+                  key={i}
+                  onClick={() => setSelectedTaskIndex(i)}
+                  className={`w-full text-left p-2 rounded ${selectedTaskIndex === i ? 'bg-gray-100' : 'hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`w-4 h-4 flex items-center justify-center rounded text-xs ${t.done ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}>
+                      {t.done ? '✓' : '•'}
+                    </span>
+                    <div className="text-sm">
+                      <div className={`${t.done ? 'line-through text-gray-400' : ''}`}>{t.name}</div>
+                      {t.comment ? <div className="text-xs text-gray-500 mt-1">{t.comment}</div> : null}
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-400">{t.done ? 'Done' : 'Pending'}</div>
+                </button>
+              ))}
+            </div>
+            <div className="p-2 border-l">
+              {selectedTaskIndex !== null && eventModalTasks[selectedTaskIndex] ? (
+                <div>
+                  <h5 className="font-medium mb-2">{eventModalTasks[selectedTaskIndex].name}</h5>
+                  {eventModalTasks[selectedTaskIndex].comment ? (
+                    <p className="text-sm text-gray-600 mb-2">{eventModalTasks[selectedTaskIndex].comment}</p>
+                  ) : (
+                    <p className="text-sm text-gray-500 mb-2">No description</p>
+                  )}
+                  <p className="text-sm text-gray-500">Date: {eventModalTasks[selectedTaskIndex].date || '—'}</p>
+                  <p className="text-sm text-gray-500">Time: {eventModalTasks[selectedTaskIndex].time || '—'}</p>
+                  <p className="text-sm text-gray-500">Status: {eventModalTasks[selectedTaskIndex].done ? 'Done' : 'Pending'}</p>
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500">Select a task to see details</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-gray-500">No tasks</div>
+        )}
       </div>
 
       <div className="mt-4 flex justify-end gap-2">
-        <button onClick={() => setEventModalOpen(false)} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200">
-          Close
-        </button>
+        {eventModalTask ? (
+          <>
+            <button
+              onClick={async () => {
+                try {
+                  const id = eventModalTask.id;
+                  if (!id) return;
+                  await updateDoc(doc(db, "tasks", id), {
+                    name: eventModalTask.name || "",
+                    date: eventModalTask.date || "",
+                    time: eventModalTask.time || null,
+                    comment: eventModalTask.comment || "",
+                    done: !!eventModalTask.done,
+                  });
+                  setEventModalTask(null);
+                  setEventModalOpen(false);
+                } catch (err) {
+                  console.error("Failed to save task:", err);
+                  alert("Failed to save task. Check console for details.");
+                }
+              }}
+              className="px-3 py-1 rounded bg-green-600 text-white hover:bg-green-700"
+            >
+              Save
+            </button>
+            <button
+              onClick={async () => {
+                if (!eventModalTask || !eventModalTask.id) return;
+                if (!window.confirm("Delete this task?")) return;
+                try {
+                  await deleteDoc(doc(db, "tasks", eventModalTask.id));
+                  setEventModalTask(null);
+                  setEventModalOpen(false);
+                } catch (err) {
+                  console.error("Failed to delete task:", err);
+                  alert("Failed to delete task. Check console for details.");
+                }
+              }}
+              className="px-3 py-1 rounded bg-red-500 text-white hover:brightness-90"
+            >
+              Delete
+            </button>
+            <button onClick={() => { setEventModalTask(null); setEventModalOpen(false); }} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200">
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button onClick={() => setEventModalOpen(false)} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200">
+            Close
+          </button>
+        )}
       </div>
     </div>
   </div>
 )}
 
+        {/* Add margin between calendar and classes */}
+        <div className="mb-8"></div>
         {/* Classes Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
           {classes.length === 0 ? (
             <p className="col-span-3 text-gray-500 text-center">No Task yet.</p>
           ) : (
             classes.map((cls) => {
-              const localTasks = Array.isArray(taskEdits[cls.id]) ? taskEdits[cls.id] : (Array.isArray(cls.tasks) ? cls.tasks.map((t) => ({ ...t })) : []);
               return (
                 <div
                   key={cls.id}
-                  className="text-white rounded-2xl p-5 shadow relative transition-all duration-300 hover:scale-[1.02] hover:shadow-lg"
+                  onClick={() => {
+                    // open modal showing tasks for this class
+                    const tasks = Array.isArray(cls.tasks) ? cls.tasks.map((t) => ({ ...t })) : [];
+                    setEventModalTitle(cls.classname || 'Class');
+                    setEventModalTasks(tasks);
+                    setSelectedTaskIndex(tasks.length > 0 ? 0 : null);
+                    setEventModalTask(null);
+                    setEventModalOpen(true);
+                  }}
+                  className="group text-white rounded-2xl p-5 shadow relative transition-all duration-300 hover:scale-[1.02] hover:shadow-lg cursor-pointer"
                   style={{ backgroundColor: cls.color || COLOR_OPTIONS[0] }}
                 >
+                  {/* Hover-only actions (top-right) */}
+                  <div className="absolute top-3 right-3 opacity-0 pointer-events-none transform scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 transition-all duration-200">
+                    <div className="flex items-center gap-2 bg-white/20 backdrop-blur rounded-full p-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleEdit(cls); }}
+                        className="text-sm bg-white/20 text-white px-3 py-1 rounded hover:bg-white/40"
+                        aria-label={`Edit ${cls.classname}`}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDelete(cls.id); }}
+                        className="text-sm bg-red-500 text-white px-3 py-1 rounded hover:brightness-90"
+                        aria-label={`Delete ${cls.classname}`}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                   <h4 className="text-lg font-semibold mb-2">{cls.classname}</h4>
                   <p className="text-sm">{(Array.isArray(cls.tasks) ? cls.tasks.length : 0)} Tasks</p>
                   <p className="text-xs opacity-90">Teacher: {cls.teacher}</p>
                   <p className="text-xs opacity-90">Schedule: {cls.schedule}</p>
                   <p className="text-xs opacity-90 mb-2">Time: {formatTime(cls.time)}</p>
 
-                  <div className="mb-3">
-                    {localTasks.length === 0 ? (
-                      <p className="text-xs text-white/70">No tasks</p>
-                    ) : (
-                      localTasks.map((t, i) => (
-                        <div key={i} className="flex items-center justify-between text-xs mb-1">
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={!!t.done}
-                              onChange={() => toggleTaskLocal(cls.id, i)}
-                            />
-                            <span className={`${t.done ? "line-through text-white/70" : ""}`}>
-                              {t.name}
-                            </span>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => removeTaskLocal(cls.id, i)}
-                              className="text-red-300 text-xs"
-                            >
-                              del
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  {/* Card simplified: only show summary info (tasks count, teacher, schedule, time). Click card to view tasks. */}
 
                   <div className="flex items-center gap-2 mb-3">
                     {cls.status === "Completed" ? (
@@ -552,59 +749,15 @@ const filteredEvents = classes
                     )}
                   </div>
 
-                  {/* Save tasks / quick-add */}
-                  <div className="absolute bottom-3 left-3 right-3 flex items-center gap-2">
-                    <div className="flex-1 flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Add task..."
-                        className="rounded p-1 text-xs w-full"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleQuickAdd(cls.id, e.target);
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={(ev) => {
-                          const inp = ev.currentTarget.previousSibling;
-                          handleQuickAdd(cls.id, inp);
-                        }}
-                        className="px-2 py-1 text-xs bg-white/20 rounded"
-                      >
-                        Add
-                      </button>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => saveTasksForClass(cls.id)}
-                        className="bg-blue-600 text-white text-xs px-3 py-1 rounded"
-                      >
-                        Save Tasks
-                      </button>
-                      <button
-                        onClick={() => handleEdit(cls)}
-                        className="bg-white/20 text-white border border-white/30 px-3 py-1 rounded text-xs"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(cls.id)}
-                        className="bg-red-500 text-white px-3 py-1 rounded text-xs"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
+                  {/* Simplified card — actions available via hover (Edit/Delete) or open modal by clicking card */}
                 </div>
               );
             })
           )}
         </div>
+        </div>
       </main>
-    </div>
+      </motion.div>
   );
 };
 

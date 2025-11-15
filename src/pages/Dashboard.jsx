@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, onSnapshot, doc } from "firebase/firestore";
+import { collection, onSnapshot, doc, getDoc} from "firebase/firestore";
 import { db, auth } from "../firebase";
 import Sidebar from "./Sidebar";
+import { motion } from "framer-motion";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -12,6 +13,22 @@ const Dashboard = () => {
   const [total, setTotal] = useState(0);
   const [co2, setCo2] = useState(0);
   const [classes, setClasses] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
+  const [loadingRecs, setLoadingRecs] = useState(false);
+  const [recError, setRecError] = useState(null);
+  const [dashboardData, setDashboardData] = useState({});
+
+useEffect(() => {
+  const loadUserData = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const snap = await getDoc(doc(db, "users", user.uid));
+    if (snap.exists()) {
+      setDashboardData(snap.data().dashboard || {});
+    }
+  };
+  loadUserData();
+}, []);
 
     // ✅ Profile state
   const [profile, setProfile] = useState({
@@ -36,14 +53,6 @@ const Dashboard = () => {
   // only show classes that are not done on the dashboard
   const visibleClasses = classes.filter((c) => c.status !== "Completed" && c.status !== "done");
 
-  // format helpers used in JSX
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "";
-    const d = new Date(dateStr);
-    if (isNaN(d)) return dateStr;
-    return d.toLocaleDateString();
-  };
-
   const formatTime = (timeStr) => {
     if (!timeStr) return "";
     const [h, m] = String(timeStr).split(":").map(Number);
@@ -53,6 +62,7 @@ const Dashboard = () => {
     return `${hh}:${String(m || 0).padStart(2, "0")} ${period}`;
   };
   
+
   // Realtime classes
   useEffect(() => {
     const unsub = onSnapshot(
@@ -121,39 +131,105 @@ useEffect(() => {
   setCo2(sum * 0.5);
 }, [expenses, filter]);
 
+const fetchRecommendations = useCallback(async () => {
+  setLoadingRecs(true);
+  setRecError(null);
 
-  return (
-    <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
-      {/* Sidebar */}
-      <Sidebar />
+  try {
+    const payload = {
+      tasks: classes,
+      deadlines: classes.map((c) => ({ name: c.classname, date: c.schedule })),
+      expenses,
+    };
 
-      {/* Main Content */}
-      <main className="flex-1 p-5 md:p-10 grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
-        {/* Left Section */}
-        <div>
-          {/* Welcome Section */}
-          <div className="bg-white w-full rounded-lg shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center px-6 py-4 mb-6">
-            <div>
-<h2 className="text-lg md:text-xl font-semibold text-gray-800">
-  Welcome back, {profile.firstName || "User"}!
-</h2>
+    const response = await fetch("http://localhost:3001/api/ai-suggestions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
-              <p className="text-sm md:text-base text-gray-600">
-                "Welcome to GreenMate – your companion for smarter classes, smarter spending, and a greener planet!
-              </p>
-            </div>
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Failed to fetch recommendations: ${response.status} ${text}`);
+    }
+
+    const data = await response.json();
+    setRecommendations(data.recommendations || []);
+  } catch (error) {
+    setRecError(error.message || String(error));
+  } finally {
+    setLoadingRecs(false);
+  }
+}, [classes, expenses]);
+
+
+// ✅ Stable debounce using useRef
+const debounceRef = useRef();
+const debouncedFetchRecommendations = useCallback(() => {
+  if (debounceRef.current) clearTimeout(debounceRef.current);
+  debounceRef.current = setTimeout(() => {
+    fetchRecommendations();
+  }, 1000);
+}, [fetchRecommendations]);
+
+// ✅ Trigger fetch whenever classes or expenses change
+useEffect(() => {
+  debouncedFetchRecommendations();
+}, [classes, expenses, debouncedFetchRecommendations]);
+
+const now = new Date();
+const currentMonth = now.getMonth(); // 0-11
+const currentYear = now.getFullYear();
+
+const taskDates = useMemo(() => {
+  return classes
+    .filter(c => c.schedule)
+    .map(c => {
+      const dateObj = c.schedule.toDate ? c.schedule.toDate() : new Date(c.schedule);
+      if (dateObj.getMonth() !== currentMonth || dateObj.getFullYear() !== currentYear) return null;
+      return dateObj.getDate();
+    })
+    .filter(Boolean);
+}, [classes, currentMonth, currentYear]);
+
+ return (
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: 20 }}
+    transition={{ duration: 0.3 }}
+    className="flex flex-col lg:flex-row min-h-screen bg-gray-100"
+  >
+    {/* Sidebar */}
+    <div className="w-full lg:w-64 lg:h-screen lg:sticky top-0 bg-white shadow z-10">
+    <Sidebar />
+</div>
+    {/* Main Content */}
+    <main className="flex-1 p-5 md:p-10 grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
+      {/* Left Section */}
+      <div>
+        {/* Welcome Section */}
+        <div className="bg-white w-full rounded-lg shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center px-6 py-4 mb-6">
+          <div>
+            <h2 className="text-lg md:text-xl font-semibold text-gray-800">
+              Welcome back, {profile.firstName || "User"}!
+            </h2>
+            <p className="text-sm md:text-base text-gray-600">
+              "Welcome to GreenMate – your companion for smarter classes, smarter spending, and a greener planet!"
+            </p>
           </div>
+        </div>
 
           {/* Activity Chart + Estimated CO2 */}
           <div className="flex flex-col lg:flex-row gap-6 mb-6">
-            {/* Activity Chart */}
-            <div className="bg-[#1E1E3F] text-white rounded-2xl shadow p-6 flex-1">
+            {/* Activity Section */}
+            <div className="bg-white rounded-2xl shadow p-6 flex-1">
               <div className="flex flex-wrap justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Activity</h3>
+                <h3 className="text-lg font-semibold text-gray-800">Activity</h3>
                 <select
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
-                  className="bg-[#2A2A4F] text-sm rounded-lg px-3 py-1 mt-2 sm:mt-0 outline-none cursor-pointer"
+                  className="bg-gray-100 text-sm rounded-lg px-3 py-1 mt-2 sm:mt-0 outline-none cursor-pointer"
                 >
                   <option>Today</option>
                   <option>This week</option>
@@ -161,70 +237,22 @@ useEffect(() => {
                 </select>
               </div>
 
-              <div className="flex flex-col sm:flex-row items:center justify-between gap-4">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                 {/* Donut Chart */}
                 <div className="relative w-32 h-32 sm:w-36 sm:h-36 mx-auto sm:mx-0">
                   <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="16" stroke="#2A2A4F" strokeWidth="4" fill="none" />
+                    <circle cx="18" cy="18" r="16" stroke="#E5E7EB" strokeWidth="4" fill="none" />
                     <circle
-                      cx="18"
-                      cy="18"
-                      r="16"
-                      stroke="#A78BFA"
-                      strokeWidth="4"
-                      strokeDasharray="32 68"
-                      fill="none"
-                      strokeLinecap="round"
-                    />
-                    <circle
-                      cx="18"
-                      cy="18"
-                      r="16"
-                      stroke="#60A5FA"
-                      strokeWidth="4"
+                      cx="18" cy="18" r="16"
+                      stroke="#60A5FA" strokeWidth="4"
                       strokeDasharray="25 75"
-                      strokeDashoffset="-32"
-                      fill="none"
-                      strokeLinecap="round"
-                    />
-                    <circle
-                      cx="18"
-                      cy="18"
-                      r="16"
-                      stroke="#34D399"
-                      strokeWidth="4"
-                      strokeDasharray="17 83"
-                      strokeDashoffset="-57"
-                      fill="none"
-                      strokeLinecap="round"
-                    />
-                    <circle
-                      cx="18"
-                      cy="18"
-                      r="16"
-                      stroke="#FBBF24"
-                      strokeWidth="4"
-                      strokeDasharray="16 84"
-                      strokeDashoffset="-74"
-                      fill="none"
-                      strokeLinecap="round"
-                    />
-                    <circle
-                      cx="18"
-                      cy="18"
-                      r="16"
-                      stroke="#F472B6"
-                      strokeWidth="4"
-                      strokeDasharray="10 90"
-                      strokeDashoffset="-90"
-                      fill="none"
-                      strokeLinecap="round"
+                      fill="none" strokeLinecap="round"
                     />
                   </svg>
 
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-base sm:text-lg font-bold">${total.toFixed(2)}</span>
-                    <span className="text-xs text-gray-300">Spent</span>
+                    <span className="text-base sm:text-lg font-bold text-gray-800">${total.toFixed(2)}</span>
+                    <span className="text-xs text-gray-500">Spent</span>
                   </div>
                 </div>
 
@@ -241,23 +269,13 @@ useEffect(() => {
                       0
                     );
 
-                    const colors = {
-                      House: "bg-purple-400",
-                      Food: "bg-blue-400",
-                      Investing: "bg-green-400",
-                      "Online Shop": "bg-yellow-400",
-                      Beauty: "bg-pink-400",
-                    };
-
                     return Object.entries(categoryTotals).map(([label, amt], idx) => {
                       const percent =
                         totalAmount > 0 ? ((amt / totalAmount) * 100).toFixed(0) + "%" : "0%";
                       return (
                         <li key={idx} className="flex justify-between w-32">
                           <span className="flex items-center gap-2">
-                            <span
-                              className={`w-3 h-3 ${colors[label] || "bg-gray-400"} rounded-full`}
-                            ></span>
+                            <span className="w-3 h-3 bg-blue-400 rounded-full"></span>
                             {label}
                           </span>
                           <span>{percent}</span>
@@ -334,36 +352,77 @@ useEffect(() => {
   </div>
 
             <hr className="my-6 border-gray-200" />
-
             {/* Calendar */}
             <div className="mb-8">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-green-700">October 2025</h3>
+                <h3 className="font-semibold text-green-700">November 2025</h3>
                 <span className="text-lg">📅</span>
               </div>
               <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-xs sm:text-sm text-gray-700">
                 {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
                   <div key={d} className="font-medium text-gray-500">{d}</div>
                 ))}
-                {[...Array(31)].map((_, i) => (
-                  <div
-                    key={i}
-                    className={`py-1 rounded-full ${
-                      [7, 19].includes(i + 1)
-                        ? "bg-blue-600 text-white font-bold"
-                        : "hover:bg-blue-100"
-                    }`}
-                  >
-                    {i + 1}
-                  </div>
-                ))}
+{[...Array(31)].map((_, i) => {
+  const day = i + 1;
+  const hasTask = taskDates.includes(day);
+
+  return (
+    <div
+      key={i}
+      className={`py-1 rounded-full cursor-pointer ${
+        hasTask ? "bg-green-600 text-white font-bold" : "hover:bg-green-100"
+      }`}
+    >
+      {day}
+    </div>
+  );
+})}
               </div>
+            </div>
+
+            {/* Smart Recommendations */}
+            <div className="bg-white p-4 rounded-xl shadow-md mb-6">
+              <h3 className="text-lg font-medium mb-2">Smart Recommendations</h3>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm text-gray-500">Personalized suggestions based on your tasks and expenses.</div>
+                <div>
+<button
+  onClick={debouncedFetchRecommendations}
+  disabled={loadingRecs}
+  className={`text-sm px-3 py-1 rounded ${
+    loadingRecs ? "bg-gray-200 text-gray-500" : "bg-green-600 text-white hover:bg-green-700"
+  }`}
+>
+  {loadingRecs ? "Refreshing..." : "Refresh"}
+</button>
+
+
+                </div>
+              </div>
+
+              {recError ? (
+                <div className="text-sm text-red-500 mb-2">{recError}</div>
+              ) : null}
+
+{loadingRecs ? (
+  <div className="text-sm text-gray-500">Loading recommendation…</div>
+) : (
+  <div className="text-sm text-gray-600 mt-2">
+    {recommendations.length > 0
+      ? recommendations[0]
+      : "Click refresh to get a smart recommendation!"}
+  </div>
+)}
+
             </div>
           </div>
         </div>
       </main>
-    </div>
+          </motion.div>
   );
 };
+  
+
+
 
 export default Dashboard;
