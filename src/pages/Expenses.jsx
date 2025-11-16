@@ -12,6 +12,7 @@ import {
   doc,
   getDoc,
 } from "firebase/firestore";
+import { query, where } from "firebase/firestore";
 
 const Expenses = () => {
   const [expenses, setExpenses] = useState([]);
@@ -38,21 +39,25 @@ useEffect(() => {
 
 
   // ✅ REALTIME FIRESTORE LISTENER (no local updates anymore)
-  useEffect(() => {
-    const unsub = onSnapshot(
-      collection(db, "expenses"),
-      (snap) => {
-        const list = snap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        }));
-        setExpenses(list);
-      },
-      (err) => console.error(err)
-    );
-    return () => unsub();
-  }, []);
+useEffect(() => {
+  const user = auth.currentUser;
+  if (!user) return;
 
+  const q = query(
+    collection(db, "expenses"),
+    where("userId", "==", user.uid) // filter by user
+  );
+
+  const unsub = onSnapshot(q, (snap) => {
+    const list = snap.docs.map((d) => ({
+      id: d.id,
+      ...d.data(),
+    }));
+    setExpenses(list);
+  }, (err) => console.error(err));
+
+  return () => unsub();
+}, []);
   // ✅ FILTER + TOTALS CALC
   useEffect(() => {
     const now = new Date();
@@ -95,6 +100,7 @@ useEffect(() => {
     await addDoc(collection(db, "expenses"), {
       ...form,
       amount: Number(form.amount),
+      userId: auth.currentUser.uid,
       timestamp: serverTimestamp(),
     });
 

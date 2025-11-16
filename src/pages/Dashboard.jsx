@@ -4,6 +4,7 @@ import { collection, onSnapshot, doc, getDoc} from "firebase/firestore";
 import { db, auth } from "../firebase";
 import Sidebar from "./Sidebar";
 import { motion } from "framer-motion";
+import { query, where } from "firebase/firestore";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -17,12 +18,35 @@ const Dashboard = () => {
   const [loadingRecs, setLoadingRecs] = useState(false);
   const [recError, setRecError] = useState(null);
   const [dashboardData, setDashboardData] = useState({});
+  const [categories, setCategories] = useState([]);
+
+// Load categories from Firestore
+useEffect(() => {
+  const user = auth.currentUser;
+  if (!user) return;
+
+  const unsub = onSnapshot(
+    collection(db, "categories"),
+    (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setCategories(list);
+    },
+    (err) => console.error("categories listener error:", err)
+  );
+
+  return () => unsub();
+}, []);
+  const normalizeDate = (dateValue) => {
+  if (!dateValue) return null;
+  if (dateValue.toDate) return dateValue.toDate(); // Firestore Timestamp
+  return new Date(dateValue); // String/Date
+};
 
 useEffect(() => {
   const loadUserData = async () => {
     const user = auth.currentUser;
     if (!user) return;
-    const snap = await getDoc(doc(db, "users", user.uid));
+    const snap = await getDoc(doc(db, "users", user.uid));console.log("Current user:", auth.currentUser); 
     if (snap.exists()) {
       setDashboardData(snap.data().dashboard || {});
     }
@@ -64,64 +88,56 @@ useEffect(() => {
   
 
   // Realtime classes
-  useEffect(() => {
-    const unsub = onSnapshot(
-      collection(db, "classes"),
-      (snap) => {
-        setClasses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      },
-      (err) => {
-        console.error("classes listener error:", err);
-      }
-    );
+useEffect(() => {
+  const user = auth.currentUser;
+  if (!user) return;
 
-    return () => unsub();
-  }, []);
+  const q = query(
+    collection(db, "classes"),
+    where("userId", "==", user.uid) // 🔑 filter by user
+  );
 
-  // Realtime expenses
-  useEffect(() => {
-    const unsub = onSnapshot(
-      collection(db, "expenses"),
-      (snap) => {
-        setExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      },
-      (err) => {
-        console.error("expenses listener error:", err);
-      }
-    );
+  const unsub = onSnapshot(q, (snap) => {
+    setClasses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  }, (err) => console.error("classes listener error:", err));
 
-    return () => unsub();
-  }, []);
+  return () => unsub();
+}, []);
+
+// Realtime expenses for current user only
+useEffect(() => {
+  const user = auth.currentUser;
+  if (!user) return;
+
+  const q = query(
+    collection(db, "expenses"),
+    where("userId", "==", user.uid) // 🔑 filter by user
+  );
+
+  const unsub = onSnapshot(q, (snap) => {
+    setExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  }, (err) => console.error("expenses listener error:", err));
+
+  return () => unsub();
+}, []);
 
 useEffect(() => {
   const now = new Date();
-
-  const normalizeDate = (dateValue) => {
-    if (!dateValue) return null;
-    if (dateValue.toDate) return dateValue.toDate(); // Firestore Timestamp
-    return new Date(dateValue); // String date
-  };
-
-  const f = (Array.isArray(expenses) ? expenses : []).filter((e) => {
+  const f = expenses.filter((e) => {
     const d = normalizeDate(e.date);
-    if (!d || isNaN(d)) return false;
+    if (!d) return false;
 
-    if (filter === "Today") {
-      return d.toDateString() === now.toDateString();
-    }
-
+    if (filter === "Today") return d.toDateString() === now.toDateString();
     if (filter === "This week") {
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - now.getDay());
-      return d >= weekStart;
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay());
+      return d >= startOfWeek;
     }
-
     if (filter === "Last month") {
       const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const end = new Date(now.getFullYear(), now.getMonth(), 1);
       return d >= start && d < end;
     }
-
     return true;
   });
 
@@ -130,6 +146,7 @@ useEffect(() => {
   setTotal(sum);
   setCo2(sum * 0.5);
 }, [expenses, filter]);
+
 
 const fetchRecommendations = useCallback(async () => {
   setLoadingRecs(true);
@@ -184,12 +201,9 @@ const currentYear = now.getFullYear();
 const taskDates = useMemo(() => {
   return classes
     .filter(c => c.schedule)
-    .map(c => {
-      const dateObj = c.schedule.toDate ? c.schedule.toDate() : new Date(c.schedule);
-      if (dateObj.getMonth() !== currentMonth || dateObj.getFullYear() !== currentYear) return null;
-      return dateObj.getDate();
-    })
-    .filter(Boolean);
+    .map(c => normalizeDate(c.schedule))
+    .filter(d => d && d.getMonth() === currentMonth && d.getFullYear() === currentYear)
+    .map(d => d.getDate());
 }, [classes, currentMonth, currentYear]);
 
  return (
@@ -237,54 +251,100 @@ const taskDates = useMemo(() => {
                 </select>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                {/* Donut Chart */}
-                <div className="relative w-32 h-32 sm:w-36 sm:h-36 mx-auto sm:mx-0">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="16" stroke="#E5E7EB" strokeWidth="4" fill="none" />
-                    <circle
-                      cx="18" cy="18" r="16"
-                      stroke="#60A5FA" strokeWidth="4"
-                      strokeDasharray="25 75"
-                      fill="none" strokeLinecap="round"
-                    />
-                  </svg>
+{/* Donut Chart + Legend */}
+<div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+  {/* Donut Chart */}
+  <div className="relative w-32 h-32 sm:w-36 sm:h-36 mx-auto sm:mx-0">
+    <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+      {/* Background Circle */}
+      <circle
+        cx="18"
+        cy="18"
+        r="16"
+        stroke="#E5E7EB"
+        strokeWidth="4"
+        fill="none"
+      />
 
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-base sm:text-lg font-bold text-gray-800">${total.toFixed(2)}</span>
-                    <span className="text-xs text-gray-500">Spent</span>
-                  </div>
-                </div>
+      {/* Compute totals once */}
+      {(() => {
+        const categoryTotals = filtered.reduce((acc, e) => {
+          acc[e.category] = (acc[e.category] || 0) + (e.amount || 0);
+          return acc;
+        }, {});
 
-                {/* Legend */}
-                <ul className="text-xs sm:text-sm space-y-2">
-                  {(() => {
-                    const categoryTotals = (filtered || []).reduce((acc, e) => {
-                      acc[e.category] = (acc[e.category] || 0) + (e.amount || 0);
-                      return acc;
-                    }, {});
+        const totalAmount = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
 
-                    const totalAmount = Object.values(categoryTotals).reduce(
-                      (sum, val) => sum + val,
-                      0
-                    );
+        const entries = Object.entries(categoryTotals);
 
-                    return Object.entries(categoryTotals).map(([label, amt], idx) => {
-                      const percent =
-                        totalAmount > 0 ? ((amt / totalAmount) * 100).toFixed(0) + "%" : "0%";
-                      return (
-                        <li key={idx} className="flex justify-between w-32">
-                          <span className="flex items-center gap-2">
-                            <span className="w-3 h-3 bg-blue-400 rounded-full"></span>
-                            {label}
-                          </span>
-                          <span>{percent}</span>
-                        </li>
-                      );
-                    });
-                  })()}
-                </ul>
-              </div>
+        let offsetAcc = 0;
+
+        return entries.map(([label, amt], idx) => {
+          const percent = totalAmount > 0 ? (amt / totalAmount) * 100 : 0;
+          const cat = categories.find(c => c.label === label);
+          const color = cat?.color || "#60A5FA";
+
+          const circle = (
+            <circle
+              key={label}
+              cx="18"
+              cy="18"
+              r="16"
+              stroke={color}
+              strokeWidth="4"
+              fill="none"
+              strokeDasharray={`${percent} ${100 - percent}`}
+              strokeDashoffset={100 - offsetAcc}
+              strokeLinecap="round"
+            />
+          );
+
+          offsetAcc += percent;
+
+          return circle;
+        });
+      })()}
+    </svg>
+
+    <div className="absolute inset-0 flex flex-col items-center justify-center">
+      <span className="text-base sm:text-lg font-bold text-gray-800">
+        ${total.toFixed(2)}
+      </span>
+      <span className="text-xs text-gray-500">Spent</span>
+    </div>
+  </div>
+
+  {/* Legend */}
+  <ul className="text-xs sm:text-sm space-y-2">
+    {(() => {
+      const categoryTotals = filtered.reduce((acc, e) => {
+        acc[e.category] = (acc[e.category] || 0) + (e.amount || 0);
+        return acc;
+      }, {});
+
+      const totalAmount = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
+
+      return Object.entries(categoryTotals).map(([label, amt], idx) => {
+        const percent = totalAmount > 0 ? ((amt / totalAmount) * 100).toFixed(0) + "%" : "0%";
+        const cat = categories.find(c => c.label === label);
+        const color = cat?.color || "#60A5FA";
+
+        return (
+          <li key={idx} className="flex justify-between w-32">
+            <span className="flex items-center gap-2">
+              <span
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: color }}
+              ></span>
+              {label}
+            </span>
+            <span>{percent}</span>
+          </li>
+        );
+      });
+    })()}
+  </ul>
+</div>
             </div>
 
             {/* Estimated CO2 */}
@@ -404,15 +464,13 @@ const taskDates = useMemo(() => {
                 <div className="text-sm text-red-500 mb-2">{recError}</div>
               ) : null}
 
-{loadingRecs ? (
-  <div className="text-sm text-gray-500">Loading recommendation…</div>
-) : (
-  <div className="text-sm text-gray-600 mt-2">
-    {recommendations.length > 0
-      ? recommendations[0]
-      : "Click refresh to get a smart recommendation!"}
-  </div>
-)}
+<div className="text-sm text-gray-600 mt-2 space-y-1">
+  {recommendations.length > 0 ? (
+    recommendations.map((rec, i) => <div key={i}>• {rec}</div>)
+  ) : (
+    "Click refresh to get a smart recommendation!"
+  )}
+</div>
 
             </div>
           </div>

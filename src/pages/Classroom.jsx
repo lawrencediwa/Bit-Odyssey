@@ -6,16 +6,8 @@ import interactionPlugin from "@fullcalendar/interaction";
 import { motion } from "framer-motion";
 
 import { db, auth } from "../firebase";
-import {
-  collection,
-  addDoc,
-  onSnapshot,
-  deleteDoc,
-  doc,
-  updateDoc,
-  serverTimestamp,
-  getDoc,
-} from "firebase/firestore";
+import { collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, serverTimestamp, getDoc, query, where } from "firebase/firestore";
+
 
 const COLOR_OPTIONS = [
   "#3B82F6", // blue
@@ -133,37 +125,44 @@ const dateTaskEvents = (Array.isArray(dateTasks) ? dateTasks : []).map((t) => {
 });
 
   // ---------- Firestore: realtime listener for classes ----------
-  useEffect(() => {
-    const q = collection(db, "classes");
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setClasses(docs);
+useEffect(() => {
+  const user = auth.currentUser;
+  if (!user) return;
 
-        // no per-card local task edits map needed anymore
-      },
-      (err) => {
-        console.error("Failed to listen to classes:", err);
-      }
-    );
+  const q = query(collection(db, "classes"), where("userId", "==", user.uid));
+  const unsub = onSnapshot(
+    q,
+    (snap) => {
+      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setClasses(docs);
+    },
+    (err) => {
+      console.error("Failed to listen to classes:", err);
+    }
+  );
 
-    return () => unsub();
-  }, []);
+  return () => unsub();
+}, []);
+
 
   // listen to standalone tasks (date-based tasks)
-  useEffect(() => {
-    const q = collection(db, "tasks");
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setDateTasks(docs);
-      },
-      (err) => console.error("Failed to listen to tasks:", err)
-    );
-    return () => unsub();
-  }, []);
+useEffect(() => {
+  const user = auth.currentUser;
+  if (!user) return;
+
+  const q = query(collection(db, "tasks"), where("userId", "==", user.uid));
+  const unsub = onSnapshot(
+    q,
+    (snap) => {
+      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setDateTasks(docs);
+    },
+    (err) => console.error("Failed to listen to tasks:", err)
+  );
+
+  return () => unsub();
+}, []);
+
 
   // ---------- Add / Update / Delete / Status / Tasks handlers ----------
   const resetForm = () => {
@@ -205,16 +204,17 @@ const dateTaskEvents = (Array.isArray(dateTasks) ? dateTasks : []).map((t) => {
         });
       } else {
         // add new
-        await addDoc(collection(db, "classes"), {
-          classname: form.classname,
-          teacher: form.teacher,
-          schedule: form.schedule,
-          time: form.time,
-          tasks: Array.isArray(form.tasks) ? form.tasks : [],
-          status: form.status || "Ongoing",
-          color: form.color || COLOR_OPTIONS[0],
-          createdAt: serverTimestamp(),
-        });
+await addDoc(collection(db, "classes"), {
+  classname: form.classname,
+  teacher: form.teacher,
+  schedule: form.schedule,
+  time: form.time,
+  tasks: Array.isArray(form.tasks) ? form.tasks : [],
+  status: form.status || "Ongoing",
+  color: form.color || COLOR_OPTIONS[0],
+  userId: auth.currentUser.uid,
+  createdAt: serverTimestamp(),
+});
       }
       resetForm();
     } catch (err) {
@@ -285,14 +285,15 @@ const dateTaskEvents = (Array.isArray(dateTasks) ? dateTasks : []).map((t) => {
           alert("Please select a date for this task.");
           return;
         }
-        await addDoc(collection(db, "tasks"), {
-          name,
-          date: taskDate,
-          time: taskTime || null,
-          done: false,
-          comment: newTaskComment || "",
-          createdAt: serverTimestamp(),
-        });
+await addDoc(collection(db, "tasks"), {
+  name,
+  date: taskDate,
+  time: taskTime || null,
+  done: false,
+  comment: newTaskComment || "",
+  userId: auth.currentUser.uid,
+  createdAt: serverTimestamp(),
+});
       }
 
       setNewTaskName("");
