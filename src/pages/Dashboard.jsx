@@ -155,29 +155,31 @@ const fetchRecommendations = useCallback(async () => {
   try {
     const payload = {
       tasks: classes,
-      deadlines: classes.map((c) => ({ name: c.classname, date: c.schedule })),
       expenses,
     };
 
-const response = await fetch("/api/ai-suggestions", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(payload),
-});
+    const response = await fetch("/api/ai-suggestions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
     if (!response.ok) {
       const text = await response.text();
+      console.error("API response error:", response.status, text);
       throw new Error(`Failed to fetch recommendations: ${response.status} ${text}`);
     }
 
     const data = await response.json();
     setRecommendations(data.recommendations || []);
   } catch (error) {
+    console.error("Fetch recommendations error:", error);
     setRecError(error.message || String(error));
   } finally {
     setLoadingRecs(false);
   }
 }, [classes, expenses]);
+
 
 
 // ✅ Stable debounce using useRef
