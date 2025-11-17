@@ -1,15 +1,6 @@
-import express from "express";
-import cors from "cors";
 import dotenv from "dotenv";
 
-dotenv.config(); // load .env variables
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const HF_API_KEY = process.env.HF_API_KEY; // Hugging Face API key
-const PORT = process.env.PORT || 3001;
+dotenv.config(); // load HF_API_KEY from environment variables
 
 // Helper to parse dates
 function toDate(d) {
@@ -22,18 +13,19 @@ function toDate(d) {
   }
 }
 
-// -----------------------------
-// POST /api/ai-suggestions
-// -----------------------------
-app.post("/api/ai-suggestions", async (req, res) => {
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const HF_API_KEY = process.env.HF_API_KEY;
+
   const { user = {}, tasks = [], expenses = [] } = req.body;
   const now = new Date();
 
   let recs = [];
 
-  // -----------------------------
   // Local Recommendation Logic
-  // -----------------------------
   try {
     const overdue = tasks.filter(
       (t) => toDate(t.schedule) < now && t.status !== "Completed" && t.status !== "done"
@@ -66,9 +58,7 @@ app.post("/api/ai-suggestions", async (req, res) => {
     console.error("Local recommendation error:", err);
   }
 
-  // -----------------------------
   // Hugging Face AI Integration
-  // -----------------------------
   try {
     const prompt = `User info: ${JSON.stringify(user)}
 Class: ${user.class || "N/A"}
@@ -77,7 +67,6 @@ Expenses: ${JSON.stringify(expenses)}
 
 Provide 3 personalized recommendations for this user on what they should focus on next.`;
 
-    // Using built-in fetch in Node 18+ (no need for node-fetch)
     const response = await fetch("https://api-inference.huggingface.co/models/bloom-560m", {
       method: "POST",
       headers: {
@@ -103,10 +92,5 @@ Provide 3 personalized recommendations for this user on what they should focus o
     console.error("Hugging Face AI error:", err);
   }
 
-  res.json({ recommendations: recs.slice(0, 3) });
-});
-
-// -----------------------------
-// Start server
-// -----------------------------
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  res.status(200).json({ recommendations: recs.slice(0, 3) });
+}
