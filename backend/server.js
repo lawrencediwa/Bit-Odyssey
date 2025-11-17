@@ -1,17 +1,17 @@
 import express from "express";
 import cors from "cors";
-import Bytez from "bytez.js";
+import dotenv from "dotenv";
+
+dotenv.config(); // load .env variables
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize Bytez SDK
-const API_KEY = "6fee0063adfcf5e62ef6a3c6d235fd6e"; // replace with your actual key
-const sdk = new Bytez(API_KEY);
-const model = sdk.model("openai/gpt-4o");
+const HF_API_KEY = process.env.HF_API_KEY; // Hugging Face API key
+const PORT = process.env.PORT || 3001;
 
-// Helper to parse Firestore dates
+// Helper to parse dates
 function toDate(d) {
   if (!d) return null;
   try {
@@ -26,7 +26,7 @@ function toDate(d) {
 // POST /api/ai-suggestions
 // -----------------------------
 app.post("/api/ai-suggestions", async (req, res) => {
-  const { tasks = [], expenses = [] } = req.body;
+  const { user = {}, tasks = [], expenses = [] } = req.body;
   const now = new Date();
 
   let recs = [];
@@ -38,7 +38,7 @@ app.post("/api/ai-suggestions", async (req, res) => {
     const overdue = tasks.filter(
       (t) => toDate(t.schedule) < now && t.status !== "Completed" && t.status !== "done"
     );
-    if (overdue.length) recs.push(`You have ${overdue.length} overdue task(s). Finish them today.`);
+    if (overdue.length) recs.push(`You have ${overdue.length} overdue task(s). Focus on completing them.`);
 
     const upcoming = tasks.filter((t) => {
       const d = toDate(t.schedule);
@@ -46,21 +46,20 @@ app.post("/api/ai-suggestions", async (req, res) => {
       const diff = (d - now) / (1000 * 60 * 60 * 24);
       return diff > 0 && diff <= 3 && t.status !== "Completed" && t.status !== "done";
     });
-    if (upcoming.length) recs.push(`You have ${upcoming.length} task(s) due soon. Schedule short study blocks.`);
+    if (upcoming.length) recs.push(`You have ${upcoming.length} task(s) due soon. Plan short study sessions.`);
 
-    if (tasks.length >= 5) recs.push("Your schedule is busy — break tasks into smaller chunks.");
+    if (tasks.length >= 5) recs.push("Your schedule is busy — consider breaking tasks into smaller chunks.");
 
     const total = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-    if (total > 500) recs.push("Your expenses are high — reduce non-essential spending.");
+    if (total > 500) recs.push("Your expenses are high — try reducing non-essential spending.");
 
     const categories = {};
     expenses.forEach((e) => {
       if (!e.category) return;
       categories[e.category] = (categories[e.category] || 0) + (Number(e.amount) || 0);
     });
-
     const topCategory = Object.entries(categories).sort((a, b) => b[1] - a[1])[0];
-    if (topCategory) recs.push(`You spend the most on ${topCategory[0]}. Consider reducing costs there.`);
+    if (topCategory) recs.push(`You spend the most on ${topCategory[0]}. Consider adjusting this.`);
 
     if (!recs.length) recs.push("Everything looks balanced — great job managing your tasks and expenses.");
   } catch (err) {
@@ -68,37 +67,40 @@ app.post("/api/ai-suggestions", async (req, res) => {
   }
 
   // -----------------------------
-  // Bytez AI Integration
+  // Hugging Face AI Integration
   // -----------------------------
   try {
-    const prompt = [
-      {
-        role: "user",
-        content: `Provide 3 personalized recommendations for the following tasks and expenses:\nTasks: ${JSON.stringify(
-          tasks
-        )}\nExpenses: ${JSON.stringify(expenses)}`
-      }
-    ];
+    const prompt = `User info: ${JSON.stringify(user)}
+Class: ${user.class || "N/A"}
+Tasks: ${JSON.stringify(tasks)}
+Expenses: ${JSON.stringify(expenses)}
 
-    const { error, output } = await model.run(prompt);
+Provide 3 personalized recommendations for this user on what they should focus on next.`;
 
-    if (error) console.error("Bytez AI returned error:", error);
+    // Using built-in fetch in Node 18+ (no need for node-fetch)
+    const response = await fetch("https://api-inference.huggingface.co/models/bloom-560m", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${HF_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ inputs: prompt }),
+    });
 
-    if (output && output.length) {
-      const aiRecs = output
-        .map((item) => (typeof item === "string" ? item : item.content))
+    const data = await response.json();
+
+    if (data && data[0] && data[0].generated_text) {
+      const aiText = data[0].generated_text;
+      const aiRecs = aiText
+        .split(/\.\s+/)
+        .slice(0, 3)
+        .map((s) => s.trim())
         .filter(Boolean);
 
-      if (aiRecs.length) {
-        console.log("Bytez AI recommendations:", aiRecs);
-        // Replace local recommendations with AI output
-        recs = aiRecs.slice(0, 3);
-      }
-    } else {
-      console.log("Bytez AI returned empty output. Using local recommendations.");
+      if (aiRecs.length) recs = aiRecs;
     }
   } catch (err) {
-    console.error("Bytez AI integration error:", err);
+    console.error("Hugging Face AI error:", err);
   }
 
   res.json({ recommendations: recs.slice(0, 3) });
@@ -107,5 +109,4 @@ app.post("/api/ai-suggestions", async (req, res) => {
 // -----------------------------
 // Start server
 // -----------------------------
-const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
