@@ -159,7 +159,7 @@ const fetchRecommendations = useCallback(async () => {
       expenses,
     };
 
-const response = await fetch(`${process.env.REACT_APP_API_URL}/api/ai-suggestions`, {
+const response = await fetch("/api/ai-suggestions", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(payload),
