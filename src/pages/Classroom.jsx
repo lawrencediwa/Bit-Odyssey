@@ -48,6 +48,36 @@ const Classroom = () => {
   const [taskTime, setTaskTime] = useState("");
   const [dateTasks, setDateTasks] = useState([]);
   const [classroomData, setClassroomData] = useState([]);
+  const [notifications, setNotifications] = useState([]); // array of task objects
+  const notifiedTasks = useRef(new Set()); // to prevent duplicate notifications
+
+useEffect(() => {
+  const checkTasks = () => {
+    const now = new Date();
+    const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
+
+    const allTasks = [
+      ...classes.flatMap(cls => (cls.tasks || []).map(t => ({...t, className: cls.classname}))),
+      ...dateTasks
+    ];
+
+    const upcomingTasks = allTasks.filter(t => {
+      if (!t.date || notifiedTasks.current.has(t.id)) return false;
+      const taskTime = t.time ? new Date(`${t.date}T${t.time}`) : new Date(`${t.date}T09:00`);
+      return taskTime >= now && taskTime <= oneHourLater;
+    });
+
+    if (upcomingTasks.length > 0) {
+      upcomingTasks.forEach(t => notifiedTasks.current.add(t.id));
+      setNotifications(prev => [...prev, ...upcomingTasks]);
+    }
+  };
+
+  checkTasks(); // initial check
+  const interval = setInterval(checkTasks, 60 * 1000); // check every minute
+  return () => clearInterval(interval);
+}, [classes, dateTasks]);
+
 
 useEffect(() => {
   const loadUserData = async () => {
@@ -268,6 +298,9 @@ const handleAddTaskToClass = async (e) => {
   if (!name) return;
 
   try {
+    const user = auth.currentUser;
+    if (!user) return;
+
     if (taskTarget === "class") {
       if (!taskClassId) {
         alert("Please select a class to add the task to.");
@@ -286,9 +319,18 @@ const handleAddTaskToClass = async (e) => {
             comment: newTaskComment || "",
             date: taskDate,
             time: taskTime || null,
-            deadlineNotificationSent: false // <--- NEW FIELD
+            deadlineNotificationSent: false
           }
         ]
+      });
+
+      // --- Add automatic notification for this task ---
+      await addDoc(collection(db, "users", user.uid, "notifications"), {
+        name,
+        className: cls.classname,
+        date: taskDate,
+        time: taskTime || "",
+        read: false
       });
 
     } else {
@@ -298,15 +340,24 @@ const handleAddTaskToClass = async (e) => {
         return;
       }
 
-      await addDoc(collection(db, "tasks"), {
+      const docRef = await addDoc(collection(db, "tasks"), {
         name,
         date: taskDate,
         time: taskTime || null,
         done: false,
         comment: newTaskComment || "",
-        userId: auth.currentUser.uid,
+        userId: user.uid,
         createdAt: serverTimestamp(),
-        deadlineNotificationSent: false // <--- NEW FIELD
+        deadlineNotificationSent: false
+      });
+
+      // --- Add automatic notification for this standalone task ---
+      await addDoc(collection(db, "users", user.uid, "notifications"), {
+        name,
+        className: "", // no class
+        date: taskDate,
+        time: taskTime || "",
+        read: false
       });
     }
 
@@ -321,6 +372,7 @@ const handleAddTaskToClass = async (e) => {
     alert("Failed to add task. Check console for details.");
   }
 };
+
 
 
   return (
@@ -497,7 +549,22 @@ const handleAddTaskToClass = async (e) => {
             </button>
           </div>
         </div>
-
+<div className="fixed top-5 right-5 space-y-2 z-50">
+  {notifications.map((t, i) => (
+    <div key={i} className="bg-yellow-300 border-l-4 border-yellow-500 text-gray-800 p-3 rounded shadow-md flex justify-between items-center">
+      <div>
+        <strong>Task Due Soon:</strong> {t.name} {t.className ? `(Class: ${t.className})` : ""}
+        <div className="text-xs">{t.date} {t.time || ""}</div>
+      </div>
+      <button
+        className="ml-3 text-gray-700 font-bold"
+        onClick={() => setNotifications(prev => prev.filter((_, index) => index !== i))}
+      >
+        ✖
+      </button>
+    </div>
+  ))}
+</div>
 <FullCalendar
   ref={calendarRef}
   plugins={[dayGridPlugin, interactionPlugin]}
