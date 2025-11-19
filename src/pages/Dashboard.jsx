@@ -159,7 +159,7 @@ const fetchRecommendations = useCallback(async () => {
       expenses,
     };
 
-const response = await fetch("https://bit-odyssey-3-c-zeta.vercel.app/", {
+const response = await fetch("https://bit-odyssey-3-c-zeta.vercel.app/api/ai-suggestions", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(payload),
