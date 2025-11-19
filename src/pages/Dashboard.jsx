@@ -412,33 +412,45 @@ const taskDates = useMemo(() => {
   </div>
 
             <hr className="my-6 border-gray-200" />
-            {/* Calendar */}
-            <div className="mb-8">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-green-700">November 2025</h3>
-                <span className="text-lg">📅</span>
-              </div>
-              <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-xs sm:text-sm text-gray-700">
-                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-                  <div key={d} className="font-medium text-gray-500">{d}</div>
-                ))}
-{[...Array(31)].map((_, i) => {
-  const day = i + 1;
-  const hasTask = taskDates.includes(day);
+{/* Calendar */}
+<div className="mb-8">
+  <div className="flex items-center justify-between mb-4">
+    <h3 className="font-semibold text-green-700">
+      {now.toLocaleString("default", { month: "long" })} {currentYear}
+    </h3>
+    <span className="text-lg">📅</span>
+  </div>
 
-  return (
-    <div
-      key={i}
-      className={`py-1 rounded-full cursor-pointer ${
-        hasTask ? "bg-green-600 text-white font-bold" : "hover:bg-green-100"
-      }`}
-    >
-      {day}
-    </div>
-  );
-})}
-              </div>
-            </div>
+  <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-xs sm:text-sm text-gray-700">
+    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+      <div key={d} className="font-medium text-gray-500">{d}</div>
+    ))}
+
+    {(() => {
+      const firstDay = new Date(currentYear, currentMonth, 1).getDay(); // 0=Sun, 6=Sat
+      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+      // Empty cells for days before the first of the month
+      const blanks = Array.from({ length: firstDay }, (_, i) => <div key={`b${i}`}></div>);
+
+      // Actual days of the month (no highlight)
+      const days = Array.from({ length: daysInMonth }, (_, i) => {
+        const day = i + 1;
+        return (
+          <div
+            key={`d${day}`}
+            className="py-1 rounded-full cursor-pointer hover:bg-green-100"
+          >
+            {day}
+          </div>
+        );
+      });
+
+      return [...blanks, ...days];
+    })()}
+  </div>
+</div>
+
 
             {/* Smart Recommendations */}
             <div className="bg-white p-4 rounded-xl shadow-md mb-6">

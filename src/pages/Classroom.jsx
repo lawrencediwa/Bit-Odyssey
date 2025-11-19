@@ -262,49 +262,66 @@ await addDoc(collection(db, "classes"), {
   // Task card inline editing and quick-add removed — tasks are managed through the Add Task panel
 
   // Add task to a selected class from the right-column Add Task form.
-  const handleAddTaskToClass = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    const name = (newTaskName || "").trim();
-    if (!name) return;
+const handleAddTaskToClass = async (e) => {
+  if (e && e.preventDefault) e.preventDefault();
+  const name = (newTaskName || "").trim();
+  if (!name) return;
 
-    try {
-      if (taskTarget === "class") {
-        if (!taskClassId) {
-          alert("Please select a class to add the task to.");
-          return;
-        }
-        const cls = classes.find((c) => c.id === taskClassId) || { tasks: [] };
-        const tasks = Array.isArray(cls.tasks) ? cls.tasks : [];
-        // include optional comment for class task
-        await updateDoc(doc(db, "classes", taskClassId), {
-  tasks: [...tasks, { name, done: false, comment: newTaskComment || "", date: taskDate, time: taskTime || null }]
-});
-      } else {
-        // date task: store in 'tasks' collection
-        if (!taskDate) {
-          alert("Please select a date for this task.");
-          return;
-        }
-await addDoc(collection(db, "tasks"), {
-  name,
-  date: taskDate,
-  time: taskTime || null,
-  done: false,
-  comment: newTaskComment || "",
-  userId: auth.currentUser.uid,
-  createdAt: serverTimestamp(),
-});
+  try {
+    if (taskTarget === "class") {
+      if (!taskClassId) {
+        alert("Please select a class to add the task to.");
+        return;
       }
 
-      setNewTaskName("");
-      setTaskDate("");
-      setTaskTime("");
-  setNewTaskComment("");
-    } catch (err) {
-      console.error("Failed to add task:", err);
-      alert("Failed to add task. Check console for details.");
+      const cls = classes.find((c) => c.id === taskClassId) || { tasks: [] };
+      const tasks = Array.isArray(cls.tasks) ? cls.tasks : [];
+
+      await updateDoc(doc(db, "classes", taskClassId), {
+        tasks: [
+          ...tasks,
+          {
+            name,
+            done: false,
+            comment: newTaskComment || "",
+            date: taskDate,
+            time: taskTime || null,
+            deadlineNotificationSent: false // <--- NEW FIELD
+          }
+        ]
+      });
+
+    } else {
+      // standalone date task
+      if (!taskDate) {
+        alert("Please select a date for this task.");
+        return;
+      }
+
+      await addDoc(collection(db, "tasks"), {
+        name,
+        date: taskDate,
+        time: taskTime || null,
+        done: false,
+        comment: newTaskComment || "",
+        userId: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+        deadlineNotificationSent: false // <--- NEW FIELD
+      });
     }
-  };
+
+    // reset input fields
+    setNewTaskName("");
+    setTaskDate("");
+    setTaskTime("");
+    setNewTaskComment("");
+
+  } catch (err) {
+    console.error("Failed to add task:", err);
+    alert("Failed to add task. Check console for details.");
+  }
+};
+
 
   return (
         <motion.div
