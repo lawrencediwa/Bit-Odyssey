@@ -161,6 +161,7 @@ const fetchRecommendations = useCallback(() => {
     const recs = [];
     const today = new Date().toDateString();
 
+
     const dueToday = classes.filter(c => {
       const d = normalizeDate(c.schedule);
       return d && d.toDateString() === today;
@@ -530,17 +531,18 @@ const taskDates = useMemo(() => {
                 <div className="text-sm text-gray-500">Personalized suggestions based on your tasks and expenses.</div>
                 <div>
 <button
-  onClick={debouncedFetchRecommendations}
+  onClick={fetchRecommendations}
   disabled={loadingRecs}
   className={`text-sm px-3 py-1 rounded ${
-    loadingRecs ? "bg-gray-200 text-gray-500" : "bg-green-600 text-white hover:bg-green-700"
+    loadingRecs
+      ? "bg-gray-200 text-gray-500"
+      : "bg-green-600 text-white hover:bg-green-700"
   }`}
 >
   {loadingRecs ? "Refreshing..." : "Refresh"}
 </button>
 
-
-                </div>
+                </div>  
               </div>
 
               {recError ? (
