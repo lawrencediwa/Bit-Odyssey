@@ -148,48 +148,131 @@ useEffect(() => {
 }, [expenses, filter]);
 
 
-const fetchRecommendations = useCallback(async () => {
+// Utility: pick a random message from an array
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+const fetchRecommendations = useCallback(() => {
   setLoadingRecs(true);
   setRecError(null);
 
   try {
-    const payload = {
-      tasks: classes,
-      deadlines: classes.map((c) => ({ name: c.classname, date: c.schedule })),
-      expenses,
-    };
+    const recs = [];
+    const today = new Date().toDateString();
 
-const response = await fetch("https://bit-odyssey-3-c-zeta.vercel.app/api/ai-suggestions", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(payload),
-});
+    const dueToday = classes.filter(c => {
+      const d = normalizeDate(c.schedule);
+      return d && d.toDateString() === today;
+    });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Failed to fetch recommendations: ${response.status} ${text}`);
+    if (dueToday.length >= 2) {
+      recs.push(
+        pick([
+          "You have several deadlines today — tackle the quickest task first to gain momentum.",
+          "Multiple tasks due today! Group similar ones to finish faster.",
+          "Today is packed! Schedule 30-minute focus sessions to get everything done."
+        ])
+      );
+    } else if (dueToday.length === 1) {
+      recs.push(
+        pick([
+          `You have a task due today: ${dueToday[0].classname}. Start early to avoid rushing.`,
+          `Don't forget your task for ${dueToday[0].classname} — finishing it now will ease your day.`,
+          `One task due today! Prioritize ${dueToday[0].classname} to stay on track.`
+        ])
+      );
     }
 
-    const data = await response.json();
-    setRecommendations(data.recommendations || []);
-  } catch (error) {
-    setRecError(error.message || String(error));
+    // RULE 2: Daily spending
+    const totalSpentToday = expenses
+      .filter(e => {
+        const d = normalizeDate(e.date);
+        return d && d.toDateString() === today;
+      })
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
+
+    if (totalSpentToday > 500) {
+      recs.push(
+        pick([
+          "Your spending today is a bit high — try a no-spend day tomorrow!",
+          "You've spent quite a bit today. Consider reviewing your non-essential purchases.",
+          "Today was costly — tracking small expenses can help you save more."
+        ])
+      );
+    } else if (totalSpentToday === 0) {
+      recs.push(
+        pick([
+          "Nice! No expenses recorded today — sustainable and budget-friendly!",
+          "Zero spending today — you're doing great!",
+          "No expenses yet today! Perfect opportunity to save even more."
+        ])
+      );
+    }
+
+    // RULE 3: Classes with many pending tasks
+    const heavyClasses = classes.filter(c => Array.isArray(c.tasks) && c.tasks.length >= 3);
+
+    heavyClasses.forEach(c => {
+      recs.push(
+        pick([
+          `Your class "${c.classname}" has many tasks — try completing one small one today.`,
+          `A lot of tasks in "${c.classname}" — break them down and finish one at a time.`,
+          `"${c.classname}" is getting loaded. Organize your tasks to reduce stress.`
+        ])
+      );
+    });
+
+    // RULE 4: Monthly spending check
+    const now = new Date();
+    const currMonth = now.getMonth();
+
+    const monthSpent = expenses
+      .filter(e => {
+        const d = normalizeDate(e.date);
+        return d && d.getMonth() === currMonth;
+      })
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
+
+    if (monthSpent > 3000) {
+      recs.push(
+        pick([
+          "Your monthly spending is getting high — review your top categories.",
+          "Consider reducing non-essentials this week to stay within budget.",
+          "Your spending this month is above average — a mini-budget check might help."
+        ])
+      );
+    }
+
+    // If no recommendations created
+    if (recs.length === 0) {
+      recs.push(
+        pick([
+          "Everything looks balanced — keep up your sustainable routine!",
+          "Nice! Your tasks and spending seem well-managed today.",
+          "Good job staying organized! You're keeping everything on track."
+        ])
+      );
+    }
+
+    setRecommendations(recs);
+  } catch (err) {
+    setRecError("Failed to generate recommendations.");
   } finally {
     setLoadingRecs(false);
   }
 }, [classes, expenses]);
 
 
-// ✅ Stable debounce using useRef
+
+// Debounce remains same
 const debounceRef = useRef();
 const debouncedFetchRecommendations = useCallback(() => {
   if (debounceRef.current) clearTimeout(debounceRef.current);
-  debounceRef.current = setTimeout(() => {
-    fetchRecommendations();
-  }, 1000);
+  debounceRef.current = setTimeout(fetchRecommendations, 600);
 }, [fetchRecommendations]);
 
-// ✅ Trigger fetch whenever classes or expenses change
+// Trigger recommendations whenever data updates
 useEffect(() => {
   debouncedFetchRecommendations();
 }, [classes, expenses, debouncedFetchRecommendations]);
