@@ -308,7 +308,7 @@ const taskDates = useMemo(() => {
 
     <div className="absolute inset-0 flex flex-col items-center justify-center">
       <span className="text-base sm:text-lg font-bold text-gray-800">
-        ${total.toFixed(2)}
+        ₱{total.toFixed(2)}
       </span>
       <span className="text-xs text-gray-500">Spent</span>
     </div>

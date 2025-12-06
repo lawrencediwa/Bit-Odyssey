@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 22, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/PC/Desktop/Bit%20Odyssey%203C/src/pages/index.js"],"sourcesContent":["import React from \"react\";\nimport ReactDOM from \"react-dom/client\";\nimport { BrowserRouter } from \"react-router-dom\";\nimport App from \"./App\";\nimport \"./index.css\";\n\nconst root = ReactDOM.createRoot(document.getElementById(\"root\"));\nroot.render(\n  <BrowserRouter>\n    <App />\n  </BrowserRouter>\n);\n"],"names":[],"mappings":";;AAAA;AACA;AACA;;;;;;;;;;;;;;;;;AAIA,MAAM,OAAO,gJAAQ,CAAC,UAAU,CAAC,SAAS,cAAc,CAAC;AACzD,KAAK,MAAM,eACT,qKAAC,sJAAa;cACZ,cAAA,qKAAC"}}]
-}

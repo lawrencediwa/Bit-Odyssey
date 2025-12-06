@@ -313,11 +313,11 @@ await updateDoc(ref, {
               {monthlyBudget > 0 ? (
                 <>
                   <p className={`text-base text-gray-600 ${totalFlash ? 'animate-pulse' : ''}`}>Monthly Budget</p>
-                  <h4 className="text-4xl font-extrabold text-gray-800 mt-1">${fmtCurrency(monthlyBudget)}</h4>
+                  <h4 className="text-4xl font-extrabold text-gray-800 mt-1">₱{fmtCurrency(monthlyBudget)}</h4>
 
                   <p className="text-base text-gray-600 mt-4">Remaining</p>
                   <h4 className={`text-2xl md:text-3xl font-semibold mt-1 ${remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    ${fmtCurrency(remaining)}
+                    ₱{fmtCurrency(remaining)}
                     <span title="Used% = (Total expenses / Monthly budget) × 100" className="ml-3 text-sm text-gray-400">🛈</span>
                   </h4>
 
@@ -410,11 +410,11 @@ await updateDoc(ref, {
               {monthlyBudget > 0 ? (
                 <>
                   <p className="text-base text-gray-600">Monthly Budget</p>
-                  <h4 className="text-3xl font-bold mt-1">${fmtCurrency(monthlyBudget)}</h4>
+                  <h4 className="text-3xl font-bold mt-1">₱{fmtCurrency(monthlyBudget)}</h4>
 
                   <div className="mt-3">
                     <p className="text-base text-gray-600">Remaining</p>
-                    <h4 className={`text-2xl font-semibold mt-1 ${remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>${fmtCurrency(remaining)}</h4>
+                    <h4 className={`text-2xl font-semibold mt-1 ${remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>₱{fmtCurrency(remaining)}</h4>
                   </div>
 
                   <div className="mt-3">
@@ -444,7 +444,7 @@ await updateDoc(ref, {
                   Object.entries(categoryTotals).map(([category, amount]) => (
                     <li key={category} className={`flex justify-between ${categoryFlash ? 'transition-all duration-500' : ''}`}>
                       <span>{category}</span>
-                      <span className="font-medium">${fmtCurrency(amount)}</span>
+                      <span className="font-medium">₱{fmtCurrency(amount)}</span>
                     </li>
                   ))
                 )}
@@ -536,7 +536,7 @@ await updateDoc(ref, {
             <div>
               <p className="text-sm text-gray-500">{filter}</p>
               <h4 className={`text-3xl font-bold text-gray-800 ${totalFlash ? 'scale-105 text-green-700 transition-transform duration-300' : ''}`}>
-                ${total.toFixed(2)}
+                ₱{total.toFixed(2)}
               </h4>
               <p className="text-gray-500">Spent</p>
             </div>
