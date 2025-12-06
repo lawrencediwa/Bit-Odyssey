@@ -1,103 +1,81 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth, db } from "../firebase"; // adjust path if needed
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../firebase"; // adjust path if needed
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { collection } from "firebase/firestore";
-
 
 const Signup = () => {
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [pwFocused, setPwFocused] = useState(false);
+  const [signupError, setSignupError] = useState("");
+  const [agreed, setAgreed] = useState(false);
+  const [agreeError, setAgreeError] = useState("");
 
   const handleChange = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
 
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  try {
-    const userCredential = await createUserWithEmailAndPassword(auth, form.email, form.password);
-    const user = userCredential.user;
-
-    // Create user Firestore document
-    await setDoc(doc(db, "users", user.uid), {
-      firstName: "",
-      lastName: "",
-      email: form.email,
-      address: "",
-      phone: "",
-      dob: "",
-      location: "",
-      postal: "",
-      avatar: "",
-      gender: "male",
-    });
-
-    // -------------------------------
-    // CREATE EMPTY SUBCOLLECTIONS HERE
-    // -------------------------------
-
-    await setDoc(doc(collection(db, "users", user.uid, "classes")), {
-      initialized: true,
-    });
-
-    await setDoc(doc(collection(db, "users", user.uid, "expenses")), {
-      initialized: true,
-    });
-
-    navigate("/dashboard");
-  } catch (error) {
-    console.error("Signup error:", error);
-    alert(error.message);
-  }
-};
-
-
-const handleGoogleSignUp = async () => {
-  try {
-    const provider = new GoogleAuthProvider();
-    const result = await signInWithPopup(auth, provider);
-    const user = result.user;
-
-    const userRef = doc(db, "users", user.uid);
-    const snap = await getDoc(userRef);
-
-    if (!snap.exists()) {
-      // Create Firestore user doc
-      await setDoc(userRef, {
-        firstName: "",
-        lastName: "",
-        email: user.email,
-        address: "",
-        phone: "",
-        dob: "",
-        location: "",
-        postal: "",
-        avatar: "",
-        gender: "male",
-      });
-
-      // -------------------------------
-      // CREATE EMPTY SUBCOLLECTIONS HERE
-      // -------------------------------
-
-      await setDoc(doc(collection(db, "users", user.uid, "classes")), {
-        initialized: true,
-      });
-
-      await setDoc(doc(collection(db, "users", user.uid, "expenses")), {
-        initialized: true,
-      });
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setSignupError("");
+    setAgreeError("");
+    const result = validatePassword(form.password);
+    if (!result.valid) {
+      setSignupError("Password must meet all requirements");
+      return;
     }
 
+    if (!agreed) {
+      setAgreeError("You must agree to the Terms & Conditions to create an account.");
+      return;
+    }
+
+    // TODO: replace with real signup logic (create account on backend)
     navigate("/dashboard");
-  } catch (error) {
-    console.error("Google sign-up error:", error);
-    alert(error.message);
-  }
-};
+  };
 
+  const passwordRules = [
+    { key: "length", label: "At least 8 characters" },
+    { key: "lower", label: "Lowercase letter" },
+    { key: "upper", label: "Uppercase letter" },
+    { key: "number", label: "Number (0-9)" },
+    { key: "special", label: "Special character (e.g. !@#$%)" },
+  ];
 
+  const validatePassword = (pw) => {
+    const errors = [];
+    const checks = {
+      length: pw && pw.length >= 8,
+      lower: /[a-z]/.test(pw || ""),
+      upper: /[A-Z]/.test(pw || ""),
+      number: /[0-9]/.test(pw || ""),
+      special: /[^A-Za-z0-9]/.test(pw || ""),
+    };
+
+    Object.keys(checks).forEach((k) => {
+      if (!checks[k]) {
+        const rule = passwordRules.find((r) => r.key === k);
+        errors.push(rule ? rule.label : k);
+      }
+    });
+
+    const score = Object.values(checks).filter(Boolean).length; // 0-5
+    return { valid: errors.length === 0, errors, score, checks };
+  };
+
+  const handleGoogleSignUp = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+
+      const user = result.user;
+      console.log("Google user:", user);
+
+      // Redirect to dashboard
+      navigate("/dashboard");
+    } catch (error) {
+      console.error("Google sign-up error:", error);
+      alert(error.message);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
@@ -123,9 +101,74 @@ const handleGoogleSignUp = async () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <input required value={form.name} onChange={handleChange("name")} placeholder="Full name" className="w-full px-4 py-3 rounded-xl border bg-gray-50 focus:outline-none" />
             <input required type="email" value={form.email} onChange={handleChange("email")} placeholder="Email address" className="w-full px-4 py-3 rounded-xl border bg-gray-50 focus:outline-none" />
-            <input required type="password" value={form.password} onChange={handleChange("password")} placeholder="Password" className="w-full px-4 py-3 rounded-xl border bg-gray-50 focus:outline-none" />
+            <div>
+              <input
+                required
+                type="password"
+                value={form.password}
+                onChange={handleChange("password")}
+                onFocus={() => setPwFocused(true)}
+                onBlur={() => setPwFocused(false)}
+                placeholder="Password"
+                className="w-full px-4 py-3 rounded-xl border bg-gray-50 focus:outline-none"
+              />
 
-            <button type="submit" className="w-full py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700">Create account</button>
+              {/* Strength bar and rules */}
+              <div className="mt-2">
+                {form.password && (
+                  (() => {
+                    const { score } = validatePassword(form.password);
+                    const percent = Math.round((score / passwordRules.length) * 100);
+                    const barColor = percent >= 80 ? "bg-green-500" : percent >= 60 ? "bg-yellow-400" : "bg-red-400";
+
+                    return (
+                      <div>
+                        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className={`${barColor} h-2`} style={{ width: `${percent}%` }} />
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">Strength: {percent}%</div>
+                      </div>
+                    );
+                  })()
+                )}
+
+                {(pwFocused || form.password) && (
+                  <ul className="mt-3 text-xs text-gray-600 space-y-1">
+                    {passwordRules.map((r) => {
+                      const ok = validatePassword(form.password).checks[r.key];
+                      return (
+                        <li key={r.key} className="flex items-center gap-2">
+                          <span className={`w-3 h-3 rounded-full ${ok ? "bg-green-500" : "bg-gray-300"}`} />
+                          <span className={ok ? "text-gray-700" : "text-gray-400"}>{r.label}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <input
+                id="agree"
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+                className="mt-1"
+              />
+              <label htmlFor="agree" className="text-sm text-gray-700">
+                I agree to the{' '}
+                <button type="button" onClick={() => navigate('/terms')} className="text-green-600 underline">
+                  Terms &amp; Conditions
+                </button>
+              </label>
+            </div>
+
+            <div>
+              <button type="submit" className="w-full py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700">Create account</button>
+              {signupError && <div className="mt-2 text-sm text-red-600">{signupError}</div>}
+              {agreeError && <div className="mt-2 text-sm text-red-600">{agreeError}</div>}
+            </div>
 
             <div className="flex items-center gap-3">
               <div className="flex-1 h-px bg-gray-200" />

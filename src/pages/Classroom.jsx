@@ -3,10 +3,18 @@ import Sidebar from "./Sidebar";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import { motion } from "framer-motion";
 
 import { db, auth } from "../firebase";
-import { collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, serverTimestamp, getDoc, query, where } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  deleteDoc,
+  doc,
+  updateDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+import { query, where } from "firebase/firestore";
 
 
 const COLOR_OPTIONS = [
@@ -47,50 +55,6 @@ const Classroom = () => {
   const [taskDate, setTaskDate] = useState("");
   const [taskTime, setTaskTime] = useState("");
   const [dateTasks, setDateTasks] = useState([]);
-  const [classroomData, setClassroomData] = useState([]);
-  const [notifications, setNotifications] = useState([]); // array of task objects
-  const notifiedTasks = useRef(new Set()); // to prevent duplicate notifications
-
-useEffect(() => {
-  const checkTasks = () => {
-    const now = new Date();
-    const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
-
-    const allTasks = [
-      ...classes.flatMap(cls => (cls.tasks || []).map(t => ({...t, className: cls.classname}))),
-      ...dateTasks
-    ];
-
-    const upcomingTasks = allTasks.filter(t => {
-      if (!t.date || notifiedTasks.current.has(t.id)) return false;
-      const taskTime = t.time ? new Date(`${t.date}T${t.time}`) : new Date(`${t.date}T09:00`);
-      return taskTime >= now && taskTime <= oneHourLater;
-    });
-
-    if (upcomingTasks.length > 0) {
-      upcomingTasks.forEach(t => notifiedTasks.current.add(t.id));
-      setNotifications(prev => [...prev, ...upcomingTasks]);
-    }
-  };
-
-  checkTasks(); // initial check
-  const interval = setInterval(checkTasks, 60 * 1000); // check every minute
-  return () => clearInterval(interval);
-}, [classes, dateTasks]);
-
-
-useEffect(() => {
-  const loadUserData = async () => {
-    const user = auth.currentUser;
-    if (!user) return;
-    const snap = await getDoc(doc(db, "users", user.uid));
-    if (snap.exists()) {
-      setClassroomData(snap.data().classroom || []);
-    }
-  };
-  loadUserData();
-}, []);
-
 
   // Inline/local task editing removed — tasks are managed through the Add Task panel or modals
 
@@ -110,9 +74,11 @@ const [eventModalTasks, setEventModalTasks] = useState([]);
 const [eventModalTask, setEventModalTask] = useState(null); // single date-task for edit/delete in modal
 const [selectedTaskIndex, setSelectedTaskIndex] = useState(null); // for class modal task selection
 
+// --- replace your existing filteredEvents with this version ---
 const filteredEvents = classes
   .filter((c) => statusFilter === "all" || c.status === statusFilter)
   .flatMap((cls) => {
+    // class event (same as before)
     const classEvent = {
       title: cls.classname,
       start:
@@ -126,20 +92,27 @@ const filteredEvents = classes
       id: `class-${cls.id}`,
     };
 
-    // ---- NEW: each task as its own event ----
-    const taskEvents = (cls.tasks || [])
-      .filter(t => t.date) // only tasks with a date
-      .map(t => ({
-        title: t.name,
-        start: t.time ? `${t.date}T${t.time}` : t.date,
-        color: "#374151",
-        extendedProps: { type: "classTask", classId: cls.id, done: t.done },
-        id: `classTask-${cls.id}-${t.name}-${t.date}`,
-      }));
+    // tasks grouped into one event (only if there are tasks)
+    const tasks = Array.isArray(cls.tasks) ? cls.tasks : [];
+    const taskEvent =
+      tasks.length > 0
+        ? {
+            title: `${cls.classname} (${tasks.length} Task${tasks.length > 1 ? "s" : ""})`,
+            start:
+              cls.schedule && /^\d{4}-\d{2}-\d{2}$/.test(cls.schedule)
+                ? cls.time
+                  ? `${cls.schedule}T${cls.time}`
+                  : cls.schedule
+                : null,
+            color: "#374151", // darker neutral color for tasks
+            extendedProps: { type: "tasks", tasks, classname: cls.classname, classId: cls.id },
+            id: `tasks-${cls.id}`,
+          }
+        : null;
 
-    return [classEvent, ...taskEvents]; // combine class + individual tasks
+    // return both (taskEvent may be null)
+    return taskEvent ? [classEvent, taskEvent] : [classEvent];
   });
-
 
 // include standalone date tasks in calendar events
 const dateTaskEvents = (Array.isArray(dateTasks) ? dateTasks : []).map((t) => {
@@ -156,43 +129,41 @@ const dateTaskEvents = (Array.isArray(dateTasks) ? dateTasks : []).map((t) => {
 
   // ---------- Firestore: realtime listener for classes ----------
 useEffect(() => {
-  const user = auth.currentUser;
-  if (!user) return;
+  const unsubAuth = auth.onAuthStateChanged((user) => {
+    if (!user) {
+      setClasses([]);
+      return;
+    }
 
-  const q = query(collection(db, "classes"), where("userId", "==", user.uid));
-  const unsub = onSnapshot(
-    q,
-    (snap) => {
+    const q = query(
+      collection(db, "classes"),
+      where("userId", "==", user.uid)  // ⬅ ONLY your classes
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
       const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setClasses(docs);
-    },
-    (err) => {
-      console.error("Failed to listen to classes:", err);
-    }
-  );
+    });
 
-  return () => unsub();
+    return unsub;
+  });
+
+  return unsubAuth;
 }, []);
-
 
   // listen to standalone tasks (date-based tasks)
-useEffect(() => {
-  const user = auth.currentUser;
-  if (!user) return;
-
-  const q = query(collection(db, "tasks"), where("userId", "==", user.uid));
-  const unsub = onSnapshot(
-    q,
-    (snap) => {
-      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setDateTasks(docs);
-    },
-    (err) => console.error("Failed to listen to tasks:", err)
-  );
-
-  return () => unsub();
-}, []);
-
+  useEffect(() => {
+    const q = collection(db, "tasks");
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setDateTasks(docs);
+      },
+      (err) => console.error("Failed to listen to tasks:", err)
+    );
+    return () => unsub();
+  }, []);
 
   // ---------- Add / Update / Delete / Status / Tasks handlers ----------
   const resetForm = () => {
@@ -242,9 +213,9 @@ await addDoc(collection(db, "classes"), {
   tasks: Array.isArray(form.tasks) ? form.tasks : [],
   status: form.status || "Ongoing",
   color: form.color || COLOR_OPTIONS[0],
-  userId: auth.currentUser.uid,
+  userId: auth.currentUser.uid,   // ⬅⬅⬅ THIS IS IMPORTANT
   createdAt: serverTimestamp(),
-});
+}); 
       }
       resetForm();
     } catch (err) {
@@ -292,104 +263,54 @@ await addDoc(collection(db, "classes"), {
   // Task card inline editing and quick-add removed — tasks are managed through the Add Task panel
 
   // Add task to a selected class from the right-column Add Task form.
-const handleAddTaskToClass = async (e) => {
-  if (e && e.preventDefault) e.preventDefault();
-  const name = (newTaskName || "").trim();
-  if (!name) return;
+  const handleAddTaskToClass = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const name = (newTaskName || "").trim();
+    if (!name) return;
 
-  try {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    if (taskTarget === "class") {
-      if (!taskClassId) {
-        alert("Please select a class to add the task to.");
-        return;
+    try {
+      if (taskTarget === "class") {
+        if (!taskClassId) {
+          alert("Please select a class to add the task to.");
+          return;
+        }
+        const cls = classes.find((c) => c.id === taskClassId) || { tasks: [] };
+        const tasks = Array.isArray(cls.tasks) ? cls.tasks : [];
+        // include optional comment for class task
+        await updateDoc(doc(db, "classes", taskClassId), { tasks: [...tasks, { name, done: false, comment: newTaskComment || "" }] });
+      } else {
+        // date task: store in 'tasks' collection
+        if (!taskDate) {
+          alert("Please select a date for this task.");
+          return;
+        }
+await addDoc(collection(db, "tasks"), {
+  name,
+  date: taskDate,
+  time: taskTime || null,
+  done: false,
+  comment: newTaskComment || "",
+  userId: auth.currentUser.uid,   // ⬅ add this
+  createdAt: serverTimestamp(),
+});
       }
 
-      const cls = classes.find((c) => c.id === taskClassId) || { tasks: [] };
-      const tasks = Array.isArray(cls.tasks) ? cls.tasks : [];
-
-      await updateDoc(doc(db, "classes", taskClassId), {
-        tasks: [
-          ...tasks,
-          {
-            name,
-            done: false,
-            comment: newTaskComment || "",
-            date: taskDate,
-            time: taskTime || null,
-            deadlineNotificationSent: false
-          }
-        ]
-      });
-
-      // --- Add automatic notification for this task ---
-      await addDoc(collection(db, "users", user.uid, "notifications"), {
-        name,
-        className: cls.classname,
-        date: taskDate,
-        time: taskTime || "",
-        read: false
-      });
-
-    } else {
-      // standalone date task
-      if (!taskDate) {
-        alert("Please select a date for this task.");
-        return;
-      }
-
-      const docRef = await addDoc(collection(db, "tasks"), {
-        name,
-        date: taskDate,
-        time: taskTime || null,
-        done: false,
-        comment: newTaskComment || "",
-        userId: user.uid,
-        createdAt: serverTimestamp(),
-        deadlineNotificationSent: false
-      });
-
-      // --- Add automatic notification for this standalone task ---
-      await addDoc(collection(db, "users", user.uid, "notifications"), {
-        name,
-        className: "", // no class
-        date: taskDate,
-        time: taskTime || "",
-        read: false
-      });
+      setNewTaskName("");
+      setTaskDate("");
+      setTaskTime("");
+  setNewTaskComment("");
+    } catch (err) {
+      console.error("Failed to add task:", err);
+      alert("Failed to add task. Check console for details.");
     }
-
-    // reset input fields
-    setNewTaskName("");
-    setTaskDate("");
-    setTaskTime("");
-    setNewTaskComment("");
-
-  } catch (err) {
-    console.error("Failed to add task:", err);
-    alert("Failed to add task. Check console for details.");
-  }
-};
-
-
+  };
 
   return (
-        <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 20 }}
-      transition={{ duration: 0.3 }}
-      className="flex flex-col lg:flex-row min-h-screen bg-gray-100"
-    >
-    {/* Sidebar */}
-    <div className="w-full lg:w-64">
-    <Sidebar />
-</div>
-  <main className="flex-1 p-4 lg:p-10">
-    <div className="w-full max-w-7xl mx-auto">
-    <h2 className="text-2xl font-semibold text-gray-800 mb-6">Classroom Manager</h2>
+    <div className="min-h-screen bg-gray-100 flex flex-col lg:flex-row">
+      <Sidebar />
+
+      <main className="flex-1 p-6 lg:p-10">
+        <h2 className="text-2xl font-semibold text-gray-800 mb-6">Classroom Manager</h2>
 
         {/* Two equal columns: left = Add/Edit Class, right = Add Task */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
@@ -414,7 +335,7 @@ const handleAddTaskToClass = async (e) => {
                 className="border rounded p-2 w-full placeholder-gray-400 text-sm"
               />
 
-              <label className="text-sm text-gray-600">Schedule</label>
+  
               <input
                 type="text"
                 placeholder="Schedule (e.g. Mon/Wed or 2025-10-23)"
@@ -549,22 +470,7 @@ const handleAddTaskToClass = async (e) => {
             </button>
           </div>
         </div>
-<div className="fixed top-5 right-5 space-y-2 z-50">
-  {notifications.map((t, i) => (
-    <div key={i} className="bg-yellow-300 border-l-4 border-yellow-500 text-gray-800 p-3 rounded shadow-md flex justify-between items-center">
-      <div>
-        <strong>Task Due Soon:</strong> {t.name} {t.className ? `(Class: ${t.className})` : ""}
-        <div className="text-xs">{t.date} {t.time || ""}</div>
-      </div>
-      <button
-        className="ml-3 text-gray-700 font-bold"
-        onClick={() => setNotifications(prev => prev.filter((_, index) => index !== i))}
-      >
-        ✖
-      </button>
-    </div>
-  ))}
-</div>
+
 <FullCalendar
   ref={calendarRef}
   plugins={[dayGridPlugin, interactionPlugin]}
@@ -840,9 +746,8 @@ const handleAddTaskToClass = async (e) => {
             })
           )}
         </div>
-        </div>
       </main>
-      </motion.div>
+    </div>
   );
 };
 

@@ -13,9 +13,10 @@ const Home = () => {
       <nav className="flex justify-between items-center px-8 py-6 shadow-sm bg-white">
         <div className="text-2xl font-bold text-green-700">GreenMate</div>
         <div className="flex gap-4">
-          <button onClick={() => navigate("/")} className="text-green-700 hover:underline">Home</button>
+          <button onClick={() => navigate("/")} className="text-g reen-700 hover:underline">Home</button>
+          <button onClick={() => navigate("/Terms")} className="text-green-700 hover:underline">Terms</button>
           <button onClick={() => navigate("/Contact")} className="text-green-700 hover:underline">Contact</button>
-          <button onClick={() => navigate("/SignUp")} className="bg-green-700 text-white px-4 py-2 rounded-lg">Get Started</button>
+          <button onClick={() => navigate("/Signup")} className="bg-green-700 text-white px-4 py-2 rounded-lg">Get Started</button>
         </div>
       </nav>
 

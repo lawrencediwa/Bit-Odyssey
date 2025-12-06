@@ -38,8 +38,8 @@ useEffect(() => {
 }, []);
   const normalizeDate = (dateValue) => {
   if (!dateValue) return null;
-  if (dateValue.toDate) return dateValue.toDate(); // Firestore Timestamp
-  return new Date(dateValue); // String/Date
+  if (dateValue.toDate) return dateValue.toDate();
+  return new Date(dateValue); 
 };
 
 useEffect(() => {
@@ -415,7 +415,7 @@ const taskDates = useMemo(() => {
             {/* Calendar */}
             <div className="mb-8">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-green-700">November 2025</h3>
+                <h3 className="font-semibold text-green-700">December 2025</h3>
                 <span className="text-lg">📅</span>
               </div>
               <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-xs sm:text-sm text-gray-700">

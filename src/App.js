@@ -8,6 +8,8 @@ import Classroom from "./pages/Classroom";
 import Expenses from "./pages/Expenses";
 import Settings from "./pages/Settings"; 
 import Learnmore from "./pages/Learnmore"; 
+import Terms from "./pages/Terms";
+import Contact from "./pages/Contact";
 
 function App() {
   return (
@@ -22,6 +24,9 @@ function App() {
       <Route path="/signup" element={<Signup />} />
       <Route path="/ForgetPass" element={<ForgetPass />} />
       <Route path="/learnmore" element={<Learnmore />} />
+      <Route path="/terms" element={<Terms />} />
+      <Route path="/contact" element={<Contact />} />
+
 
     </Routes>
   );
