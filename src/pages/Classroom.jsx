@@ -3,6 +3,7 @@ import Sidebar from "./Sidebar";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
+import { sendNotification } from "../utils/sendNotification";
 
 import { db, auth } from "../firebase";
 import {
@@ -304,6 +305,58 @@ await addDoc(collection(db, "tasks"), {
       alert("Failed to add task. Check console for details.");
     }
   };
+useEffect(() => {
+  const interval = setInterval(() => {
+    const now = new Date();
+
+    const allTasks = [
+      ...classes.flatMap((cls) =>
+        (cls.tasks || []).map((t) => ({
+          ...t,
+          date: cls.schedule,
+          time: cls.time,
+          classname: cls.classname,
+        }))
+      ),
+      ...dateTasks,
+    ];
+
+    allTasks.forEach((task) => {
+      if (!task.date) return;
+      const taskDate = new Date(task.date + (task.time ? `T${task.time}` : "T00:00"));
+      const diff = taskDate - now;
+
+      if (diff > 0 && diff <= 60 * 60 * 1000 && !task.done) {
+        sendNotification("Task Reminder", task.name + (task.classname ? ` (${task.classname})` : ""));
+      }
+    });
+  }, 60 * 1000);
+
+  return () => clearInterval(interval);
+}, [classes, dateTasks]);
+
+useEffect(() => {
+  const now = new Date();
+  const today = now.toISOString().split("T")[0];
+
+  const todayTasks = [
+    ...classes.flatMap((cls) =>
+      (cls.tasks || []).map((t) => ({
+        ...t,
+        date: cls.schedule,
+        time: cls.time,
+        classname: cls.classname,
+      }))
+    ),
+    ...dateTasks,
+  ].filter((t) => t.date === today && !t.done);
+
+  if (todayTasks.length) {
+    sendNotification("Today's Tasks", todayTasks.map((t) => t.name).join("\n"));
+  }
+}, []);
+
+
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col lg:flex-row">

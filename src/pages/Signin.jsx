@@ -22,18 +22,24 @@ const Signin = () => {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      console.log("Google user:", user);
-      navigate("/dashboard");
-    } catch (error) {
-      console.error("Google sign-in error:", error);
-      alert(error.message);
-    }
-  };
+const [loading, setLoading] = useState(false);
+
+const handleGoogleSignIn = async () => {
+  if (loading) return; // prevent multiple popups
+  setLoading(true);
+  try {
+    const provider = new GoogleAuthProvider();
+    const result = await signInWithPopup(auth, provider);
+    console.log("Google user:", result.user);
+    navigate("/dashboard");
+  } catch (error) {
+    console.error("Google sign-in error:", error);
+    alert(error.message);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">

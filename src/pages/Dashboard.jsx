@@ -5,6 +5,7 @@ import { db, auth } from "../firebase";
 import Sidebar from "./Sidebar";
 import { motion } from "framer-motion";
 import { query, where } from "firebase/firestore";
+import { sendNotification } from "../utils/sendNotification";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ const Dashboard = () => {
   const [dashboardData, setDashboardData] = useState({});
   const [categories, setCategories] = useState([]);
 
+  
 // Load categories from Firestore
 useEffect(() => {
   const user = auth.currentUser;
@@ -288,6 +290,54 @@ const taskDates = useMemo(() => {
     .filter(d => d && d.getMonth() === currentMonth && d.getFullYear() === currentYear)
     .map(d => d.getDate());
 }, [classes, currentMonth, currentYear]);
+const prevExpensesRef = useRef([]);
+
+useEffect(() => {
+  const prev = prevExpensesRef.current.map((e) => e.id);
+  const newExpenses = expenses.filter((e) => !prev.includes(e.id));
+
+  newExpenses.forEach((e) => {
+    sendNotification("New Expense Added", `₱${e.amount} added to ${e.category}`);
+  });
+
+  prevExpensesRef.current = expenses;
+}, [expenses]);
+
+const prevClassesRef = useRef([]);
+
+useEffect(() => {
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+
+  const isDueSoon = (cls) => {
+    const d = normalizeDate(cls.schedule);
+    if (!d) return false;
+    return d.toDateString() === now.toDateString() || d.toDateString() === tomorrow.toDateString();
+  };
+
+  const prevIds = prevClassesRef.current.map((c) => c.id);
+  const newDue = classes.filter((c) => !prevIds.includes(c.id) && isDueSoon(c));
+
+  newDue.forEach((c) => {
+    sendNotification(
+      "Upcoming Task",
+      `${c.classname} is due ${normalizeDate(c.schedule).toDateString()}`
+    );
+  });
+
+  prevClassesRef.current = classes;
+}, [classes]);
+
+useEffect(() => {
+  const todayStr = new Date().toDateString();
+  const lastReminder = localStorage.getItem("dailyReminder");
+  if (lastReminder !== todayStr) {
+    sendNotification("Daily Reminder", "Don't forget to log your expenses and check tasks!");
+    localStorage.setItem("dailyReminder", todayStr);
+  }
+}, []);
+
 
  return (
   <motion.div
@@ -564,7 +614,5 @@ const taskDates = useMemo(() => {
   );
 };
   
-
-
 
 export default Dashboard;
