@@ -19,7 +19,7 @@ const Settings = () => {
     address: "",
     phone: "",
     dob: "",
-    location: "",
+    age: "",
     postal: "",
     avatar: "",
     gender: "male",
@@ -120,7 +120,7 @@ const handlePwdSubmit = async (e) => {
       address: "",
       phone: "",
       dob: "",
-      location: "",
+      age: "",
       postal: "",
       avatar: "",
       gender: "male",
@@ -289,9 +289,9 @@ const handlePwdSubmit = async (e) => {
                   />
                   <input
                     type="text"
-                    value={form.location}
-                    onChange={handleChange("location")}
-                    placeholder="Location"
+                    value={form.age}
+                    onChange={handleChange("age")}
+                    placeholder="Age"
                     className="bg-gray-100 rounded-full px-5 py-3 text-sm border border-transparent focus:outline-none focus:ring-2 focus:ring-green-200"
                   />
                   <input
@@ -370,8 +370,8 @@ const handlePwdSubmit = async (e) => {
                   </div>
 
                   <div className="bg-white p-4 rounded-xl shadow">
-                    <p className="text-gray-500 text-sm">Location</p>
-                    <p className="font-medium text-gray-800">{form.location}</p>
+                    <p className="text-gray-500 text-sm">Age</p>
+                    <p className="font-medium text-gray-800">{form.age}</p>
                   </div>
 
                   <div className="bg-white p-4 rounded-xl shadow">

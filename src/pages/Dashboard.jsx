@@ -147,7 +147,6 @@ useEffect(() => {
   setCo2(sum * 0.5);
 }, [expenses, filter]);
 
-
 // Utility: pick a random message from an array
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];

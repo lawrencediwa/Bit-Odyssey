@@ -1,6 +1,7 @@
   import React, { useState, useEffect } from "react";
   import Sidebar from "./Sidebar";
   import { db, auth} from "../firebase";
+  import { sendNotification } from "../utils/sendNotification";
 import { 
   collection, 
   onSnapshot, 
@@ -21,7 +22,7 @@ import {
     const [categoryTotals, setCategoryTotals] = useState({});
     const [co2, setCo2] = useState(0);
     const [showHistory, setShowHistory] = useState(false);
-    const [editExpense, setEditExpense] = useState(null);
+    const [editExpense, setEditExpense] = useState(null); 
     // Monthly budget stored locally; 0 means not set
     const [monthlyBudget, setMonthlyBudget] = useState(() => {
       try {
@@ -42,6 +43,60 @@ import {
     const firstTotalsRef = React.useRef(true);
     // Onboarding modal shown once (persisted). It appears when there is no budget and no expenses.
     const [showOnboarding, setShowOnboarding] = useState(false);
+    useEffect(() => {
+  if (total >= monthlyBudget && monthlyBudget > 0) {
+    sendNotification("Budget Alert", "You have reached or exceeded your monthly budget!");
+  }
+}, [total, monthlyBudget]);
+useEffect(() => {
+  if (total >= monthlyBudget && monthlyBudget > 0) {
+    sendNotification("Budget Alert", "You have reached or exceeded your monthly budget!");
+  }
+}, [total, monthlyBudget]);
+useEffect(() => {
+  const now = new Date();
+  const lastReminder = localStorage.getItem("dailyReminder");
+  const todayStr = now.toDateString();
+
+  if (lastReminder !== todayStr) {
+    sendNotification("Daily Reminder", "Don't forget to log your expenses today!");
+    localStorage.setItem("dailyReminder", todayStr);
+  }
+}, [expenses]);
+
+useEffect(() => {
+  if ("Notification" in window) {
+    Notification.requestPermission().then((permission) => {
+      if (permission === "granted") {
+        new Notification("✅ Test Notification", { body: "Notifications are working!" });
+      }
+    });
+  }
+}, []);
+
+
+    useEffect(() => {
+  if (!auth.currentUser) return;
+
+  const q = query(
+    collection(db, "expenses"),
+    where("userId", "==", auth.currentUser.uid)
+  );
+
+  const unsub = onSnapshot(q, (snap) => {
+    snap.docChanges().forEach((change) => {
+      if (change.type === "added") {
+        const e = change.doc.data();
+        sendNotification(
+          "New Expense Added",
+          `₱${e.amount} added to ${e.category}`
+        );
+      }
+    });
+  });
+
+  return () => unsub();
+}, []);
 
 useEffect(() => {
   const unsubAuth = auth.onAuthStateChanged(user => {
