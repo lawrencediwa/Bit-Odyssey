@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { auth } from "../firebase"; // adjust path if needed
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword } from "firebase/auth";
 
 const Signup = () => {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "" });
   const [pwFocused, setPwFocused] = useState(false);
   const [signupError, setSignupError] = useState("");
   const [agreed, setAgreed] = useState(false);
@@ -13,13 +13,44 @@ const Signup = () => {
 
   const handleChange = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
 
-  const handleSubmit = (e) => {
+  const passwordRules = [
+    { key: "length", label: "At least 12 characters" },
+    { key: "lower", label: "Lowercase letter" },
+    { key: "upper", label: "Uppercase letter" },
+    { key: "number", label: "Number (0-9)" },
+    { key: "special", label: "Special character (e.g. !@#$%)" },
+    { key: "noSpaces", label: "No spaces" },
+  ];
+
+  const validatePassword = (pw) => {
+    const checks = {
+      length: pw && pw.length >= 12,
+      lower: /[a-z]/.test(pw || ""),
+      upper: /[A-Z]/.test(pw || ""),
+      number: /[0-9]/.test(pw || ""),
+      special: /[^A-Za-z0-9]/.test(pw || ""),
+      noSpaces: !/\s/.test(pw || ""),
+    };
+
+    const errors = Object.keys(checks).filter((k) => !checks[k]);
+    const score = Object.values(checks).filter(Boolean).length;
+
+    return { valid: errors.length === 0, errors, score, checks };
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setSignupError("");
     setAgreeError("");
+
     const result = validatePassword(form.password);
     if (!result.valid) {
       setSignupError("Password must meet all requirements");
+      return;
+    }
+
+    if (form.password !== form.confirm) {
+      setSignupError("Passwords do not match");
       return;
     }
 
@@ -28,48 +59,21 @@ const Signup = () => {
       return;
     }
 
-    // TODO: replace with real signup logic (create account on backend)
-    navigate("/dashboard");
-  };
-
-  const passwordRules = [
-    { key: "length", label: "At least 8 characters" },
-    { key: "lower", label: "Lowercase letter" },
-    { key: "upper", label: "Uppercase letter" },
-    { key: "number", label: "Number (0-9)" },
-    { key: "special", label: "Special character (e.g. !@#$%)" },
-  ];
-
-  const validatePassword = (pw) => {
-    const errors = [];
-    const checks = {
-      length: pw && pw.length >= 8,
-      lower: /[a-z]/.test(pw || ""),
-      upper: /[A-Z]/.test(pw || ""),
-      number: /[0-9]/.test(pw || ""),
-      special: /[^A-Za-z0-9]/.test(pw || ""),
-    };
-
-    Object.keys(checks).forEach((k) => {
-      if (!checks[k]) {
-        const rule = passwordRules.find((r) => r.key === k);
-        errors.push(rule ? rule.label : k);
-      }
-    });
-
-    const score = Object.values(checks).filter(Boolean).length; // 0-5
-    return { valid: errors.length === 0, errors, score, checks };
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, form.email, form.password);
+      console.log("User created:", userCredential.user);
+      navigate("/dashboard");
+    } catch (error) {
+      setSignupError(error.message);
+    }
   };
 
   const handleGoogleSignUp = async () => {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-
       const user = result.user;
       console.log("Google user:", user);
-
-      // Redirect to dashboard
       navigate("/dashboard");
     } catch (error) {
       console.error("Google sign-up error:", error);
@@ -101,6 +105,7 @@ const Signup = () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <input required value={form.name} onChange={handleChange("name")} placeholder="Full name" className="w-full px-4 py-3 rounded-xl border bg-gray-50 focus:outline-none" />
             <input required type="email" value={form.email} onChange={handleChange("email")} placeholder="Email address" className="w-full px-4 py-3 rounded-xl border bg-gray-50 focus:outline-none" />
+
             <div>
               <input
                 required
@@ -112,25 +117,34 @@ const Signup = () => {
                 placeholder="Password"
                 className="w-full px-4 py-3 rounded-xl border bg-gray-50 focus:outline-none"
               />
+              <input
+                required
+                type="password"
+                value={form.confirm}
+                onChange={handleChange("confirm")}
+                placeholder="Confirm Password"
+                className="w-full px-4 py-3 mt-2 rounded-xl border bg-gray-50 focus:outline-none"
+              />
 
               {/* Strength bar and rules */}
               <div className="mt-2">
-                {form.password && (
-                  (() => {
-                    const { score } = validatePassword(form.password);
-                    const percent = Math.round((score / passwordRules.length) * 100);
-                    const barColor = percent >= 80 ? "bg-green-500" : percent >= 60 ? "bg-yellow-400" : "bg-red-400";
+                {form.password && (() => {
+                  const { score } = validatePassword(form.password);
+                  const percent = Math.round((score / passwordRules.length) * 100);
+                  let barColor = "bg-red-400";
+                  if (percent >= 90) barColor = "bg-green-500";
+                  else if (percent >= 70) barColor = "bg-yellow-400";
+                  else if (percent >= 50) barColor = "bg-orange-400";
 
-                    return (
-                      <div>
-                        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                          <div className={`${barColor} h-2`} style={{ width: `${percent}%` }} />
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">Strength: {percent}%</div>
+                  return (
+                    <div>
+                      <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div className={`${barColor} h-2`} style={{ width: `${percent}%` }} />
                       </div>
-                    );
-                  })()
-                )}
+                      <div className="text-xs text-gray-500 mt-1">Strength: {percent}%</div>
+                    </div>
+                  );
+                })()}
 
                 {(pwFocused || form.password) && (
                   <ul className="mt-3 text-xs text-gray-600 space-y-1">

@@ -57,6 +57,17 @@ const Classroom = () => {
   const [taskTime, setTaskTime] = useState("");
   const [dateTasks, setDateTasks] = useState([]);
 
+    // monitoring state
+    const [totalTasksCount, setTotalTasksCount] = useState(0);
+    const [completedTasksCount, setCompletedTasksCount] = useState(0);
+    const [completionPercent, setCompletionPercent] = useState(0);
+    const prevCompletedRef = useRef(0);
+    const [showCompletionToast, setShowCompletionToast] = useState(false);
+    const [toastMessage, setToastMessage] = useState("");
+    const [flashProgress, setFlashProgress] = useState(false);
+    const [showProgressModal, setShowProgressModal] = useState(false);
+  
+
   // Inline/local task editing removed — tasks are managed through the Add Task panel or modals
 
   // view & filter state
@@ -165,6 +176,37 @@ useEffect(() => {
     );
     return () => unsub();
   }, []);
+
+    // compute overall task completion metrics whenever classes or dateTasks change
+    useEffect(() => {
+      const classTaskItems = (classes || []).flatMap((c) => (Array.isArray(c.tasks) ? c.tasks : []));
+      const dateTaskItems = Array.isArray(dateTasks) ? dateTasks : [];
+  
+      const totalClassTasks = classTaskItems.length;
+      const totalDateTasks = dateTaskItems.length;
+      const total = totalClassTasks + totalDateTasks;
+  
+      const completedClass = classTaskItems.filter((t) => !!t.done).length;
+      const completedDate = dateTaskItems.filter((t) => !!t.done).length;
+      const completed = completedClass + completedDate;
+  
+      setTotalTasksCount(total);
+      setCompletedTasksCount(completed);
+      const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+      setCompletionPercent(pct);
+  
+      // detect increases in completed tasks to show a small toast and flash
+      if (prevCompletedRef.current !== undefined && completed > prevCompletedRef.current) {
+        const delta = completed - prevCompletedRef.current;
+        setToastMessage(`${delta} task${delta > 1 ? 's' : ''} completed`);
+        setShowCompletionToast(true);
+        setFlashProgress(true);
+        setTimeout(() => setFlashProgress(false), 900);
+        // hide toast after 3s
+        setTimeout(() => setShowCompletionToast(false), 3000);
+      }
+      prevCompletedRef.current = completed;
+    }, [classes, dateTasks]);
 
   // ---------- Add / Update / Delete / Status / Tasks handlers ----------
   const resetForm = () => {
@@ -389,13 +431,30 @@ useEffect(() => {
               />
 
   
-              <input
-                type="text"
-                placeholder="Schedule (e.g. Mon/Wed or 2025-10-23)"
-                value={form.schedule}
-                onChange={(e) => setForm({ ...form, schedule: e.target.value })}
-                className="border rounded p-2 w-full placeholder-gray-400 text-sm"
-              />
+             <label className="text-sm text-gray-600">Day(s) of week</label>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((d) => {
+                  const active = Array.isArray(form.schedule) && form.schedule.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => {
+                        setForm((prev) => {
+                          const prevDays = Array.isArray(prev.schedule) ? prev.schedule : [];
+                          if (prevDays.includes(d)) {
+                            return { ...prev, schedule: prevDays.filter((x) => x !== d) };
+                          }
+                          return { ...prev, schedule: [...prevDays, d] };
+                        });
+                      }}
+                      className={`px-3 py-1 rounded text-sm ${active ? 'bg-green-600 text-white' : 'bg-gray-100'}`}
+                    >
+                      {d.slice(0,3)}
+                    </button>
+                  );
+                })}
+              </div>
 
               <label className="text-sm text-gray-600">Time</label>
               <input
@@ -523,6 +582,25 @@ useEffect(() => {
             </button>
           </div>
         </div>
+                  {/* Task completion monitoring */}
+          <div className="flex items-center gap-4">
+            <div className="text-sm text-gray-600">Progress</div>
+            <div className="w-48 bg-gray-200 rounded-full h-3 overflow-hidden">
+              <div
+                className={`h-3 rounded-full ${flashProgress ? 'animate-pulse' : ''}`}
+                style={{ width: `${Math.min(100, Math.max(0, completionPercent))}%`, backgroundColor: '#10B981' }}
+                title={`${completionPercent}%`}
+              />
+            </div>
+            <div className="text-sm text-gray-700">{completedTasksCount}/{totalTasksCount}</div>
+            <button
+              onClick={() => setShowProgressModal(true)}
+              className="ml-3 px-3 py-1 rounded bg-green-600 text-white text-sm hover:bg-green-700"
+            >
+              View Progress
+            </button>
+          </div>
+
 
 <FullCalendar
   ref={calendarRef}
@@ -725,6 +803,71 @@ useEffect(() => {
             Close
           </button>
         )}
+      </div>
+    </div>
+  </div>
+)}
+
+{/* Completion toast */}
+{showCompletionToast && (
+  <div className="fixed right-4 top-4 z-60">
+    <div className="bg-green-600 text-white px-4 py-2 rounded shadow-lg">{toastMessage}</div>
+  </div>
+)}
+
+{/* Progress Modal */}
+{showProgressModal && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="absolute inset-0 bg-black/50" onClick={() => setShowProgressModal(false)} />
+    <div className="relative bg-white rounded-lg shadow-lg w-full max-w-2xl p-6 z-10">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold">Progress Summary</h3>
+        <button onClick={() => setShowProgressModal(false)} className="text-gray-600 hover:text-gray-800">✖</button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <p className="text-sm text-gray-500">Overall Completion</p>
+          <p className="text-3xl font-bold text-gray-800">{completionPercent}%</p>
+          <div className="mt-3 bg-gray-100 rounded-full h-3 overflow-hidden">
+            <div style={{ width: `${Math.min(100, Math.max(0, completionPercent))}%`, backgroundColor: '#10B981' }} className="h-3 rounded-full" />
+          </div>
+          <div className="mt-3 text-sm text-gray-600">{completedTasksCount} done • {Math.max(0, totalTasksCount - completedTasksCount)} remaining • {totalTasksCount} total</div>
+        </div>
+
+        <div>
+          <p className="text-sm text-gray-500 mb-2">Per-class breakdown</p>
+          <div className="space-y-2 max-h-56 overflow-auto">
+            {(classes || []).map((cls) => {
+              const tasks = Array.isArray(cls.tasks) ? cls.tasks : [];
+              const done = tasks.filter((t) => !!t.done).length;
+              const total = tasks.length;
+              const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+              return (
+                <div key={cls.id} className="flex items-center justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-gray-800">{cls.classname}</div>
+                    <div className="text-xs text-gray-500">{done} / {total} done</div>
+                    <div className="mt-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                      <div style={{ width: `${pct}%`, backgroundColor: '#60A5FA' }} className="h-2 rounded-full" />
+                    </div>
+                  </div>
+                  <div className="w-12 text-right text-sm font-semibold">{pct}%</div>
+                </div>
+              );
+            })}
+            { (Array.isArray(dateTasks) && dateTasks.length > 0) && (
+              <div className="pt-2 border-t mt-2">
+                <div className="text-sm font-medium text-gray-800">Date Tasks</div>
+                <div className="text-xs text-gray-500">{dateTasks.filter(t => !!t.done).length} / {dateTasks.length} done</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <button onClick={() => setShowProgressModal(false)} className="px-4 py-2 rounded bg-gray-100 hover:bg-gray-200">Close</button>
       </div>
     </div>
   </div>
