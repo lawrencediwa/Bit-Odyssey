@@ -199,23 +199,25 @@ useEffect(() => {
     }, [monthlyBudget]);
 
     // ✅ ADD EXPENSE (writes directly to Firestore)
-    const handleSubmit = async (e) => {
-      e.preventDefault();
-      if (!form.amount || !form.date) {
-        alert("Please fill out all fields.");
-        return;
-      }
+const handleSubmit = async (e) => {
+  e.preventDefault();
+
+if (!form.category) {
+  alert("Please select a category first.");
+  return;
+}
 
 await addDoc(collection(db, "expenses"), {
   ...form,
   amount: Number(form.amount),
   date: form.date,
-  userId: auth.currentUser.uid,   // <-- ADD THIS
+  userId: auth.currentUser.uid,
+  category: form.category,   // <-- USE THIS
   timestamp: serverTimestamp(),
 });
 
-      setForm({ category: "House", amount: "", date: "" });
-    };
+  setForm({ amount: "", date: "", note: "" });
+};
 
     // ✅ EDIT EXPENSE (Firestore only)
     const handleSaveEdit = async (e) => {
@@ -250,50 +252,121 @@ await updateDoc(ref, {
     };
 
     // ✅ CATEGORY STATE (still local because it’s UI preference, not data)
-    const [categories, setCategories] = useState([
-      { label: "House", color: "#A78BFA" },
-      { label: "Food", color: "#60A5FA" },
-      { label: "Investing", color: "#34D399" },
-      { label: "Online Shop", color: "#FBBF24" },
-      { label: "Beauty", color: "#F472B6" },
-    ]);
+const defaultCategories = [
+  { label: "House", color: "#A78BFA" },
+  { label: "Food", color: "#60A5FA" },
+  { label: "Investing", color: "#34D399" },
+  { label: "Online Shop", color: "#FBBF24" },
+  { label: "Beauty", color: "#F472B6" },
+];
     const [editingCategory, setEditingCategory] = useState(null);
     const [catForm, setCatForm] = useState({ label: "", color: "#9CA3AF" });
+    const [categories, setCategories] = useState([]);
+const [customCategories, setCustomCategories] = useState([]);
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+
+    const q = query(
+      collection(db, "categories"),
+      where("userId", "==", auth.currentUser.uid)
+    );
+
+    const unsub = onSnapshot(q, snapshot => {
+      const cats = snapshot.docs.map(d => ({
+        label: d.data().label,
+        color: d.data().color || "#9CA3AF",
+        id: d.id,
+      }));
+      setCustomCategories(cats);
+    });
+
+    return () => unsub();
+  }, [auth.currentUser]);
+
+  // whenever defaultCategories or customCategories change, merge them
+  useEffect(() => {
+    // you might choose to dedupe by label
+    const merged = [
+      ...defaultCategories,
+      ...customCategories.filter(
+        c => !defaultCategories.some(dc => dc.label === c.label)
+      )
+    ];
+    setCategories(merged);
+  }, [customCategories]);
+
+  const addCategory = async () => {
+
+    await addDoc(collection(db, "categories"), {
+      userId: auth.currentUser.uid,
+      label: catForm.label.trim(),
+      color: catForm.color || "#9CA3AF"
+    });
+    setCatForm({ label: "", color: "#9CA3AF" });
+    // no need to manually setCategories; the onSnapshot will pick it up and re-merge
+  };
+
 
     const startEditCategory = (cat) => {
       setEditingCategory(cat.label);
       setCatForm({ label: cat.label, color: cat.color });
     };
 
-    const saveEditedCategory = () => {
-      if (!editingCategory) return;
-      if (!catForm.label.trim()) {
-        alert("Category label cannot be empty.");
-        return;
-      }
-      // prevent duplicate label (except renaming to same)
-      if (
-        categories.some(
-          (c) => c.label.toLowerCase() === catForm.label.trim().toLowerCase() && c.label !== editingCategory
-        )
-      ) {
-        alert("A category with that label already exists.");
-        return;
-      }
+const saveEditedCategory = async () => {
+  if (!editingCategory) return;
+  if (!catForm.label.trim()) {
+    alert("Category label cannot be empty.");
+    return;
+  }
 
-      setCategories((prev) =>
-        prev.map((c) =>
-          c.label === editingCategory ? { ...c, label: catForm.label.trim(), color: catForm.color } : c
-        )
-      );
-      // Update expenses that used the old category label
-      setExpenses((prev) =>
-        prev.map((e) => (e.category === editingCategory ? { ...e, category: catForm.label.trim() } : e))
-      );
+  // prevent duplicate label
+  if (
+    categories.some(
+      (c) =>
+        c.label.toLowerCase() === catForm.label.trim().toLowerCase() &&
+        c.label !== editingCategory
+    )
+  ) {
+    alert("A category with that label already exists.");
+    return;
+  }
 
-      setEditingCategory(null);
-      setCatForm({ label: "", color: "#9CA3AF" });
-    };
+  try {
+    // Find Firestore doc for the edited category
+    const catDoc = categories.find(c => c.label === editingCategory && c.id);
+    if (catDoc) {
+      const ref = doc(db, "categories", catDoc.id);
+      await updateDoc(ref, {
+        label: catForm.label.trim(),
+        color: catForm.color,
+      });
+    }
+
+    // Update local categories state immediately
+    setCategories((prev) =>
+      prev.map((c) =>
+        c.label === editingCategory
+          ? { ...c, label: catForm.label.trim(), color: catForm.color }
+          : c
+      )
+    );
+
+    // Update any expenses using old category label
+    setExpenses((prev) =>
+      prev.map((e) =>
+        e.category === editingCategory
+          ? { ...e, category: catForm.label.trim() }
+          : e
+      )
+    );
+
+    setEditingCategory(null);
+    setCatForm({ label: "", color: "#9CA3AF" });
+  } catch (err) {
+    console.error("Failed to save category edit:", err);
+  }
+};
 
     const cancelEditCategory = () => {
       setEditingCategory(null);
@@ -327,19 +400,6 @@ await updateDoc(ref, {
       }
     };
 
-    const addCategory = () => {
-      if (!catForm.label.trim()) {
-        alert("Enter a label for the new category.");
-        return;
-      }
-      if (categories.some((c) => c.label.toLowerCase() === catForm.label.trim().toLowerCase())) {
-        alert("Category already exists.");
-        return;
-      }
-      const newCat = { label: catForm.label.trim(), color: catForm.color || "#9CA3AF" };
-      setCategories((prev) => [newCat, ...prev]);
-      setCatForm({ label: "", color: "#9CA3AF" });
-    };
     // --- CHANGES END ---
 
     return (

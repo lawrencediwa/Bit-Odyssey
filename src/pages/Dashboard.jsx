@@ -386,58 +386,54 @@ useEffect(() => {
 
 {/* Donut Chart + Legend */}
 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-  {/* Donut Chart */}
-  <div className="relative w-32 h-32 sm:w-36 sm:h-36 mx-auto sm:mx-0">
-    <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-      {/* Background Circle */}
-      <circle
-        cx="18"
-        cy="18"
-        r="16"
-        stroke="#E5E7EB"
-        strokeWidth="4"
-        fill="none"
-      />
+{/* Donut Chart */}
+<div className="relative w-32 h-32 sm:w-36 sm:h-36 mx-auto sm:mx-0">
+  <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+    {/* Background Circle */}
+    <circle
+      cx="18"
+      cy="18"
+      r="16"
+      stroke="#E5E7EB"
+      strokeWidth="4"
+      fill="none"
+    />
 
-      {/* Compute totals once */}
-      {(() => {
-        const categoryTotals = filtered.reduce((acc, e) => {
-          acc[e.category] = (acc[e.category] || 0) + (e.amount || 0);
-          return acc;
-        }, {});
+    {/* Compute totals and draw slices */}
+    {(() => {
+      const categoryTotals = filtered.reduce((acc, e) => {
+        acc[e.category] = (acc[e.category] || 0) + Number(e.amount || 0);
+        return acc;
+      }, {});
 
-        const totalAmount = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
+      const totalAmount = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
 
-        const entries = Object.entries(categoryTotals);
+      let offsetAcc = 0;
 
-        let offsetAcc = 0;
+      return Object.entries(categoryTotals).map(([label, value]) => {
+        const percent = totalAmount > 0 ? (value / totalAmount) * 100 : 0;
+        const categoryObj = categories.find(c => c.label === label);
+        const color = categoryObj?.color || "#60A5FA";
 
-        return entries.map(([label, amt], idx) => {
-          const percent = totalAmount > 0 ? (amt / totalAmount) * 100 : 0;
-          const cat = categories.find(c => c.label === label);
-          const color = cat?.color || "#60A5FA";
+        const slice = (
+          <circle
+            key={label}
+            cx="18"
+            cy="18"
+            r="16"
+            fill="none"
+            stroke={color}
+            strokeWidth="4"
+            strokeDasharray={`${percent} ${100 - percent}`}
+            strokeDashoffset={100 - offsetAcc}
+          />
+        );
 
-          const circle = (
-            <circle
-              key={label}
-              cx="18"
-              cy="18"
-              r="16"
-              stroke={color}
-              strokeWidth="4"
-              fill="none"
-              strokeDasharray={`${percent} ${100 - percent}`}
-              strokeDashoffset={100 - offsetAcc}
-              strokeLinecap="round"
-            />
-          );
-
-          offsetAcc += percent;
-
-          return circle;
-        });
-      })()}
-    </svg>
+        offsetAcc += percent;
+        return slice;
+      });
+    })()}
+  </svg>
 
     <div className="absolute inset-0 flex flex-col items-center justify-center">
       <span className="text-base sm:text-lg font-bold text-gray-800">
@@ -459,8 +455,10 @@ useEffect(() => {
 
       return Object.entries(categoryTotals).map(([label, amt], idx) => {
         const percent = totalAmount > 0 ? ((amt / totalAmount) * 100).toFixed(0) + "%" : "0%";
-        const cat = categories.find(c => c.label === label);
-        const color = cat?.color || "#60A5FA";
+const color = categories.find(e => e.category === label)?.color
+            || categories.find(c => c.label === label)?.color
+            || "#60A5FA";
+
 
         return (
           <li key={idx} className="flex justify-between w-32">
