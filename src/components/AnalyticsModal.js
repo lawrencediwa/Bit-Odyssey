@@ -4,7 +4,6 @@ import { db, auth } from "../firebase";
 import { PieChart, Pie, Cell } from "recharts"; // optional small pie preview
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import myFont from "./NotoSans-Regular.ttf";
 
 export default function AnalyticsModal() {
   const [open, setOpen] = useState(false);
@@ -107,9 +106,6 @@ export default function AnalyticsModal() {
     pdf.text(`Generated: ${new Date().toLocaleString()}`, margin, 95);
 
     let cursorY = 115;
-pdf.addFileToVFS("NotoSans.ttf", myFont);
-pdf.addFont("NotoSans.ttf", "NotoSans", "normal");
-pdf.setFont("NotoSans");
 pdf.setFont("Helvetica", "normal"); // avoid encoding issues
 pdf.setFontSize(13);
 pdf.text("Expense by Category", margin, cursorY);
