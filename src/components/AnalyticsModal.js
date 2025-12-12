@@ -4,7 +4,7 @@ import { db, auth } from "../firebase";
 import { PieChart, Pie, Cell } from "recharts"; // optional small pie preview
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-
+import myFont from "./NotoSans-Regular.ttf";
 
 export default function AnalyticsModal() {
   const [open, setOpen] = useState(false);
@@ -107,18 +107,23 @@ export default function AnalyticsModal() {
     pdf.text(`Generated: ${new Date().toLocaleString()}`, margin, 95);
 
     let cursorY = 115;
+pdf.addFileToVFS("NotoSans.ttf", myFont);
+pdf.addFont("NotoSans.ttf", "NotoSans", "normal");
+pdf.setFont("NotoSans");
+pdf.setFont("Helvetica", "normal"); // avoid encoding issues
+pdf.setFontSize(13);
+pdf.text("Expense by Category", margin, cursorY);
+cursorY += 10;
 
-    // Table: Expenses by Category
-    pdf.setFontSize(13);
-    pdf.text("Expense by Category", margin, cursorY);
-    cursorY += 10;
+const catTable = {
+  head: [["Category", "Amount (PHP)", "Total"]],
+  body: categoryData.map((c) => [
+    c.label,
+    `PHP ${Number(c.value).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    ""
+  ]),
+};
 
-    const catTable = {
-      head: [["Category", "Amount (₱)", "Total"]],
-      body: categoryData.map((c) => [c.label, `₱ ${Number(c.value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, ""]),
-    };
-
-    // draw the category table
 autoTable(pdf, {
   startY: cursorY + 6,
   head: catTable.head,
@@ -126,8 +131,14 @@ autoTable(pdf, {
   theme: "grid",
   styles: { fontSize: 10, cellPadding: 6 },
   headStyles: { fillColor: [240, 240, 240] },
+  parseHtml: false, // <-- IMPORTANT FIX
+  didParseCell: (data) => {
+    data.cell.styles.textColor = [0, 0, 0];
+  }
 });
-cursorY = pdf.lastAutoTable ? pdf.lastAutoTable.finalY + 12 : cursorY + 80;
+
+cursorY = pdf.lastAutoTable?.finalY + 12;
+
 
 
     // Classes table
