@@ -6,6 +6,7 @@ import Sidebar from "./Sidebar";
 import { motion } from "framer-motion";
 import { query, where } from "firebase/firestore";
 import { sendNotification } from "../utils/sendNotification";
+import AnalyticsModal from "../components/AnalyticsModal"; // adjust path
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -20,6 +21,8 @@ const Dashboard = () => {
   const [recError, setRecError] = useState(null);
   const [dashboardData, setDashboardData] = useState({});
   const [categories, setCategories] = useState([]);
+  const [openAnalytics, setOpenAnalytics] = useState(false);
+
 
   
 // Load categories from Firestore
@@ -520,9 +523,9 @@ const color = categories.find(e => e.category === label)?.color
           </div>
         </div>
 
-        {/* Right Section */}
+        {/* Right Section */} 
         <div>
-<div className="bg-white rounded-2xl shadow p-6">
+          <div className="bg-white rounded-2xl shadow p-6">
   {/* Profile */}
   <div className="text-center mb-6">
     <img
@@ -541,6 +544,13 @@ const color = categories.find(e => e.category === label)?.color
       Profile
     </button>
   </div>
+  <button
+  onClick={() => setOpenAnalytics(true)}
+  className="bg-green-600 text-white mt-3 px-5 py-2 rounded-xl hover:bg-green-700 hover:scale-105 hover:shadow-lg active:scale-95 transition-all duration-300 ease-in-out"
+>
+  View Analytics
+</button>
+
 
             <hr className="my-6 border-gray-200" />
             {/* Calendar */}
@@ -608,6 +618,16 @@ const color = categories.find(e => e.category === label)?.color
           </div>
         </div>
       </main>
+      {openAnalytics && (
+  <AnalyticsModal
+    open={openAnalytics}
+    setOpen={setOpenAnalytics}
+    expenses={expenses}
+    categories={categories}
+    profile={profile}
+    classes={classes}
+  />
+)}
           </motion.div>
   );
 };
